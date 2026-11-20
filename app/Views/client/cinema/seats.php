@@ -2,33 +2,36 @@
 /**
  * app/Views/client/cinema/seats.php - Sơ đồ chọn ghế tương tác thời gian thực
  */
-$showtimeId = (int)($_GET['showtime_id'] ?? 1);
-$pageTitle = 'Chọn Ghế Ngồi - MovieGo';
+$pageTitle = 'Chọn Ghế Ngồi - ' . ($showtime['movie_title'] ?? 'MovieGo');
 include __DIR__ . '/layouts/header.php';
 
-// Mock combos
-$combos = [
-  ['id' => 1, 'name' => 'Combo Solo', 'price' => 79000, 'desc' => '1 Bắp lớn + 1 Nước lớn', 'icon' => '🍿'],
-  ['id' => 2, 'name' => 'Combo Couple', 'price' => 109000, 'desc' => '1 Bắp lớn + 2 Nước lớn', 'icon' => '🍿🥤'],
-  ['id' => 3, 'name' => 'Combo Family', 'price' => 199000, 'desc' => '2 Bắp lớn + 4 Nước ngọt', 'icon' => '🍿🍿🥤'],
-  ['id' => 4, 'name' => 'Nước ngọt lớn', 'price' => 35000, 'desc' => 'Coca-Cola / Pepsi / Sprite', 'icon' => '🥤'],
-];
+$showtimeId = (int)($showtimeId ?? 1);
+$showtime   = $showtime ?? [];
+$soldSeats  = $soldSeats ?? [];
+$combos     = $combos ?? [];
 
-// Generate seat grid: Rows A-H, Cols 1-12
+// Hàng A-H, Cột 1-12
 $rows = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
-$soldSeats = ['B3', 'B4', 'C6', 'C7', 'D5', 'D8', 'E9', 'F4', 'F5'];
+$basePrice = (int)($showtime['base_price'] ?? 75000);
 ?>
 
 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+  <?php if (!empty($_SESSION['checkout_error'])): ?>
+    <div class="mb-6 p-4 rounded-2xl bg-red-950/60 border border-red-500/50 text-red-300 text-xs flex items-center justify-between">
+      <span><?= htmlspecialchars($_SESSION['checkout_error']) ?></span>
+      <?php unset($_SESSION['checkout_error']); ?>
+    </div>
+  <?php endif; ?>
+
   <!-- Top Info Bar -->
   <div class="flex items-center gap-4 mb-8 border-b border-gray-800 pb-4">
-    <a href="javascript:history.back()" class="p-2.5 rounded-xl bg-gray-900 hover:bg-gray-800 border border-gray-800 text-gray-300">
+    <a href="/cinema/detail?id=<?= $showtime['movie_id'] ?? 1 ?>" class="p-2.5 rounded-xl bg-gray-900 hover:bg-gray-800 border border-gray-800 text-gray-300">
       <i data-lucide="arrow-left" class="w-5 h-5"></i>
     </a>
     <div>
-      <h1 class="text-xl sm:text-2xl font-black text-white">Avengers: Doomsday</h1>
+      <h1 class="text-xl sm:text-2xl font-black text-white"><?= htmlspecialchars($showtime['movie_title'] ?? 'Đang tải...') ?></h1>
       <p class="text-xs text-gray-400 mt-0.5">
-        MovieGo Quận 1 • Phòng 1 • Hôm nay • 16:00 • IMAX 2D
+        <?= htmlspecialchars($showtime['cinema_name'] ?? '') ?> • <?= htmlspecialchars($showtime['screen_name'] ?? '') ?> • <?= date('d/m/Y - H:i', strtotime($showtime['starts_at'] ?? 'now')) ?> • <?= htmlspecialchars($showtime['format'] ?? '2D') ?>
       </p>
     </div>
   </div>
@@ -42,13 +45,14 @@ $soldSeats = ['B3', 'B4', 'C6', 'C7', 'D5', 'D8', 'E9', 'F4', 'F5'];
         <p class="text-[11px] font-bold text-gray-400 uppercase tracking-widest mt-2">MÀN HÌNH CHIẾU</p>
       </div>
 
-      <!-- Seat Grid Container (Hỗ trợ cuộn ngang trên mobile) -->
+      <!-- Seat Grid Container -->
       <div class="overflow-x-auto pb-4">
         <div class="min-w-[500px] flex flex-col gap-2.5 items-center">
           <?php foreach ($rows as $row): 
             $isVIP = in_array($row, ['D', 'E', 'F']);
             $isCouple = ($row === 'H');
-            $price = $isCouple ? 160000 : ($isVIP ? 95000 : 75000);
+            $surcharge = $isCouple ? 85000 : ($isVIP ? 20000 : 0);
+            $price = $basePrice + $surcharge;
           ?>
             <div class="flex items-center gap-2">
               <span class="w-6 text-xs font-bold text-gray-500 text-center"><?= $row ?></span>
@@ -87,15 +91,15 @@ $soldSeats = ['B3', 'B4', 'C6', 'C7', 'D5', 'D8', 'E9', 'F4', 'F5'];
       <div class="flex flex-wrap items-center justify-center gap-4 sm:gap-6 mt-8 pt-6 border-t border-gray-800 text-xs text-gray-400">
         <div class="flex items-center gap-2">
           <span class="w-4 h-4 rounded bg-gray-800 border border-gray-700"></span>
-          <span>Ghế thường (75k)</span>
+          <span>Thường (<?= number_format($basePrice, 0, ',', '.') ?>₫)</span>
         </div>
         <div class="flex items-center gap-2">
           <span class="w-4 h-4 rounded bg-gray-800 border border-amber-500/60"></span>
-          <span>Ghế VIP (95k)</span>
+          <span>VIP (<?= number_format($basePrice + 20000, 0, ',', '.') ?>₫)</span>
         </div>
         <div class="flex items-center gap-2">
           <span class="w-4 h-4 rounded bg-purple-950/60 border border-purple-500/60"></span>
-          <span>Ghế đôi (160k)</span>
+          <span>Đôi (<?= number_format($basePrice + 85000, 0, ',', '.') ?>₫)</span>
         </div>
         <div class="flex items-center gap-2">
           <span class="w-4 h-4 rounded bg-amber-500 shadow"></span>
@@ -177,18 +181,18 @@ $soldSeats = ['B3', 'B4', 'C6', 'C7', 'D5', 'D8', 'E9', 'F4', 'F5'];
       <?php foreach ($combos as $cb): ?>
         <div class="p-3.5 rounded-2xl bg-gray-950 border border-gray-800 flex items-center justify-between">
           <div class="flex items-center gap-3">
-            <span class="text-2xl"><?= $cb['icon'] ?></span>
+            <span class="text-2xl"><?= $cb['icon'] ?? '🍿' ?></span>
             <div>
               <h4 class="font-bold text-sm text-white"><?= htmlspecialchars($cb['name']) ?></h4>
-              <p class="text-xs text-gray-400"><?= htmlspecialchars($cb['desc']) ?></p>
+              <p class="text-xs text-gray-400"><?= htmlspecialchars($cb['desc'] ?? '') ?></p>
               <span class="text-xs font-semibold text-amber-400"><?= number_format($cb['price'], 0, ',', '.') ?>₫</span>
             </div>
           </div>
 
           <div class="flex items-center gap-2 bg-gray-900 border border-gray-800 rounded-xl p-1">
-            <button type="button" onclick="updateCombo(<?= $cb['id'] ?>, -1, <?= $cb['price'] ?>, '<?= $cb['name'] ?>')" class="w-7 h-7 rounded-lg bg-gray-800 text-white flex items-center justify-center hover:bg-gray-700 font-bold">-</button>
+            <button type="button" onclick="updateCombo(<?= $cb['id'] ?>, -1, <?= $cb['price'] ?>, '<?= addslashes($cb['name']) ?>')" class="w-7 h-7 rounded-lg bg-gray-800 text-white flex items-center justify-center hover:bg-gray-700 font-bold">-</button>
             <span id="qty-<?= $cb['id'] ?>" class="w-6 text-center text-xs font-bold text-white">0</span>
-            <button type="button" onclick="updateCombo(<?= $cb['id'] ?>, 1, <?= $cb['price'] ?>, '<?= $cb['name'] ?>')" class="w-7 h-7 rounded-lg bg-amber-500 text-gray-950 flex items-center justify-center hover:bg-amber-400 font-bold">+</button>
+            <button type="button" onclick="updateCombo(<?= $cb['id'] ?>, 1, <?= $cb['price'] ?>, '<?= addslashes($cb['name']) ?>')" class="w-7 h-7 rounded-lg bg-amber-500 text-gray-950 flex items-center justify-center hover:bg-amber-400 font-bold">+</button>
           </div>
         </div>
       <?php endforeach; ?>
@@ -285,7 +289,8 @@ $soldSeats = ['B3', 'B4', 'C6', 'C7', 'D5', 'D8', 'E9', 'F4', 'F5'];
   function proceedToCheckout() {
     if (selectedSeats.length === 0) return;
     const seatParam = encodeURIComponent(selectedSeats.map(s => s.id).join(','));
-    window.location.href = `/cinema/checkout?seats=${seatParam}`;
+    const comboParam = encodeURIComponent(JSON.stringify(selectedCombos));
+    window.location.href = `/cinema/checkout?showtime_id=<?= $showtimeId ?>&seats=${seatParam}&combos=${comboParam}`;
   }
 </script>
 

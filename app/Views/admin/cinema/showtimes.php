@@ -1,28 +1,31 @@
 <?php
 /**
- * app/Views/admin/cinema/showtimes.php - Quản lý Suất chiếu
+ * app/Views/admin/cinema/showtimes.php - Quản lý Suất chiếu MovieGo Admin
  */
 $pageTitle = 'Quản Lý Suất Chiếu - MovieGo Admin';
 $activeMenu = 'showtimes';
 include __DIR__ . '/layouts/sidebar.php';
 
-$showtimes = [
-  ['id' => 1, 'movie' => 'Avengers: Doomsday', 'cinema' => 'MovieGo Quận 1', 'screen' => 'Phòng 1', 'date' => 'Hôm nay', 'time' => '10:00', 'format' => '2D', 'price' => 75000],
-  ['id' => 2, 'movie' => 'Avengers: Doomsday', 'cinema' => 'MovieGo Quận 1', 'screen' => 'Phòng 2', 'date' => 'Hôm nay', 'time' => '13:30', 'format' => '3D', 'price' => 95000],
-  ['id' => 3, 'movie' => 'Avengers: Doomsday', 'cinema' => 'MovieGo Quận 1', 'screen' => 'Phòng 1', 'date' => 'Hôm nay', 'time' => '16:00', 'format' => 'IMAX', 'price' => 120000],
-  ['id' => 4, 'movie' => 'Dune: Phần Ba', 'cinema' => 'MovieGo Quận 1', 'screen' => 'Phòng 3', 'date' => 'Hôm nay', 'time' => '09:30', 'format' => 'IMAX', 'price' => 120000],
-  ['id' => 5, 'movie' => 'Lật Mặt 9: Bí Mật Gia Tộc', 'cinema' => 'MovieGo Quận 1', 'screen' => 'Phòng 4', 'date' => 'Hôm nay', 'time' => '10:00', 'format' => '2D', 'price' => 70000],
-  ['id' => 6, 'movie' => 'Mai - Phần 2', 'cinema' => 'MovieGo Quận 7', 'screen' => 'Phòng 5', 'date' => 'Hôm nay', 'time' => '14:30', 'format' => '2D', 'price' => 65000],
-];
+$showtimes   = $showtimes ?? [];
+$moviesList  = $moviesList ?? [];
+$screensList = $screensList ?? [];
+$msg         = $msg ?? '';
 ?>
 
 <div class="space-y-6">
+  <?php if (!empty($msg)): ?>
+    <div class="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold flex items-center gap-2">
+      <i data-lucide="check-circle" class="w-4 h-4 text-emerald-600"></i>
+      <span><?= htmlspecialchars($msg) ?></span>
+    </div>
+  <?php endif; ?>
+
   <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
     <div>
-      <h1 class="text-xl sm:text-2xl font-black text-gray-900">Quản lý Lịch & Suất Chiếu</h1>
-      <p class="text-xs text-gray-500 mt-0.5">Sắp xếp khung giờ, định dạng phòng chiếu (2D/3D/IMAX) và giá vé.</p>
+      <h1 class="text-xl sm:text-2xl font-black text-gray-900">Quản lý Lịch & Suất Chiếu (<?= count($showtimes) ?>)</h1>
+      <p class="text-xs text-gray-500 mt-0.5">Sắp xếp khung giờ, định dạng phòng chiếu (2D/3D/IMAX) và giá vé trong CSDL.</p>
     </div>
-    <button type="button" onclick="alert('Mở modal thêm suất chiếu')" class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md transition-colors">
+    <button type="button" onclick="openShowtimeModal()" class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md transition-colors">
       <i data-lucide="plus" class="w-4 h-4"></i> Tạo suất chiếu mới
     </button>
   </div>
@@ -35,7 +38,7 @@ $showtimes = [
             <th class="py-3 px-4">Tên phim</th>
             <th class="py-3 px-4">Cụm rạp</th>
             <th class="py-3 px-4">Phòng chiếu</th>
-            <th class="py-3 px-4">Giờ chiếu</th>
+            <th class="py-3 px-4">Thời gian chiếu</th>
             <th class="py-3 px-4">Định dạng</th>
             <th class="py-3 px-4">Giá vé cơ bản</th>
             <th class="py-3 px-4 text-right">Thao tác</th>
@@ -44,23 +47,26 @@ $showtimes = [
         <tbody class="divide-y divide-gray-100">
           <?php foreach ($showtimes as $st): ?>
             <tr class="hover:bg-gray-50/80 transition-colors">
-              <td class="py-3.5 px-4 font-bold text-gray-900"><?= htmlspecialchars($st['movie']) ?></td>
-              <td class="py-3.5 px-4 text-gray-600"><?= htmlspecialchars($st['cinema']) ?></td>
-              <td class="py-3.5 px-4 font-semibold text-gray-800"><?= $st['screen'] ?></td>
-              <td class="py-3.5 px-4 font-black text-blue-600 text-sm"><?= $st['time'] ?></td>
+              <td class="py-3.5 px-4 font-bold text-gray-900"><?= htmlspecialchars($st['movie_title']) ?></td>
+              <td class="py-3.5 px-4 text-gray-600"><?= htmlspecialchars($st['cinema_name']) ?></td>
+              <td class="py-3.5 px-4 font-semibold text-gray-800"><?= htmlspecialchars($st['screen_name']) ?></td>
+              <td class="py-3.5 px-4 font-black text-blue-600 text-sm">
+                <?= date('H:i - d/m/Y', strtotime($st['starts_at'])) ?>
+              </td>
               <td class="py-3.5 px-4">
                 <span class="px-2 py-0.5 rounded text-[10px] font-bold <?= $st['format'] === 'IMAX' ? 'bg-indigo-50 text-indigo-700 border border-indigo-100' : ($st['format'] === '3D' ? 'bg-purple-50 text-purple-700 border border-purple-100' : 'bg-gray-100 text-gray-700') ?>">
-                  <?= $st['format'] ?>
+                  <?= htmlspecialchars($st['format']) ?>
                 </span>
               </td>
-              <td class="py-3.5 px-4 font-bold text-gray-900"><?= number_format($st['price'], 0, ',', '.') ?>₫</td>
+              <td class="py-3.5 px-4 font-bold text-gray-900"><?= number_format($st['base_price'], 0, ',', '.') ?>₫</td>
               <td class="py-3.5 px-4 text-right">
-                <button type="button" onclick="alert('Chỉnh sửa suất chiếu')" class="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50">
-                  <i data-lucide="edit-3" class="w-4 h-4"></i>
-                </button>
-                <button type="button" onclick="if(confirm('Xóa suất chiếu?')) alert('Đã xóa!')" class="p-1.5 rounded-lg text-red-600 hover:bg-red-50">
-                  <i data-lucide="trash-2" class="w-4 h-4"></i>
-                </button>
+                <form method="post" action="/admin/cinema/showtimes" class="inline" onsubmit="return confirm('Bạn có chắc chắn muốn xóa suất chiếu này?');">
+                  <input type="hidden" name="action" value="delete">
+                  <input type="hidden" name="id" value="<?= $st['id'] ?>">
+                  <button type="submit" class="p-1.5 rounded-lg text-red-600 hover:bg-red-50 transition-colors" title="Xóa suất chiếu">
+                    <i data-lucide="trash-2" class="w-4 h-4"></i>
+                  </button>
+                </form>
               </td>
             </tr>
           <?php endforeach; ?>
@@ -69,5 +75,74 @@ $showtimes = [
     </div>
   </div>
 </div>
+
+<!-- Modal Tạo Suất Chiếu Mới -->
+<div id="showtime-modal" class="hidden fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+  <div class="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-4">
+    <div class="flex items-center justify-between border-b border-gray-100 pb-3">
+      <h3 class="text-base font-bold text-gray-900">Tạo Suất Chiếu Mới</h3>
+      <button type="button" onclick="closeShowtimeModal()" class="p-1 rounded-lg text-gray-400 hover:text-gray-600">
+        <i data-lucide="x" class="w-5 h-5"></i>
+      </button>
+    </div>
+
+    <form method="post" action="/admin/cinema/showtimes" class="space-y-3.5 text-xs">
+      <input type="hidden" name="action" value="add">
+
+      <div>
+        <label class="block font-semibold text-gray-700 mb-1">Chọn Phim Chiếu <span class="text-red-500">*</span></label>
+        <select name="movie_id" required class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3.5 py-2 text-xs focus:outline-none focus:border-blue-600">
+          <?php foreach ($moviesList as $m): ?>
+            <option value="<?= $m['id'] ?>"><?= htmlspecialchars($m['title']) ?></option>
+          <?php endforeach; ?>
+        </select>
+      </div>
+
+      <div>
+        <label class="block font-semibold text-gray-700 mb-1">Chọn Cụm Rạp & Phòng Chiếu <span class="text-red-500">*</span></label>
+        <select name="screen_id" required class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3.5 py-2 text-xs focus:outline-none focus:border-blue-600">
+          <?php foreach ($screensList as $sc): ?>
+            <option value="<?= $sc['id'] ?>"><?= htmlspecialchars($sc['cinema_name']) ?> - <?= htmlspecialchars($sc['screen_name']) ?></option>
+          <?php endforeach; ?>
+        </select>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block font-semibold text-gray-700 mb-1">Thời gian bắt đầu chiếu <span class="text-red-500">*</span></label>
+          <input type="datetime-local" name="starts_at" required value="<?= date('Y-m-d\T19:00') ?>"
+                 class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3.5 py-2 text-xs focus:outline-none focus:border-blue-600">
+        </div>
+        <div>
+          <label class="block font-semibold text-gray-700 mb-1">Định dạng chiếu</label>
+          <select name="format" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3.5 py-2 text-xs focus:outline-none focus:border-blue-600">
+            <option value="2D">2D Digital</option>
+            <option value="3D">3D Digital</option>
+            <option value="IMAX">IMAX Laser</option>
+          </select>
+        </div>
+      </div>
+
+      <div>
+        <label class="block font-semibold text-gray-700 mb-1">Giá vé cơ bản (ghế standard) - VNĐ</label>
+        <input type="number" step="5000" name="base_price" value="75000" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3.5 py-2 text-xs focus:outline-none focus:border-blue-600">
+      </div>
+
+      <div class="pt-3 border-t border-gray-100 flex justify-end gap-2">
+        <button type="button" onclick="closeShowtimeModal()" class="px-4 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold text-xs">Hủy</button>
+        <button type="submit" class="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md">Tạo Suất Chiếu</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+  function openShowtimeModal() {
+    document.getElementById('showtime-modal').classList.remove('hidden');
+  }
+  function closeShowtimeModal() {
+    document.getElementById('showtime-modal').classList.add('hidden');
+  }
+</script>
 
 <?php include __DIR__ . '/layouts/footer.php'; ?>

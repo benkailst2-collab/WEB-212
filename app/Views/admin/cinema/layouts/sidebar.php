@@ -1,4 +1,5 @@
 <?php
+defined('APP_ENTRY') or exit('Forbidden');
 /**
  * app/Views/admin/cinema/layouts/sidebar.php
  * Sidebar LIGHT MODE cho trang quản trị MovieGo Admin.
@@ -13,6 +14,7 @@ $menuItems = [
   'cinemas'    => ['Quản lý Cụm Rạp',     '/admin/cinema/cinemas',   'building-2'],
   'showtimes'  => ['Quản lý Suất chiếu',  '/admin/cinema/showtimes', 'calendar'],
   'orders'     => ['Quản lý Đơn hàng',    '/admin/cinema/orders',    'shopping-cart'],
+  'users'      => ['Quản lý Tài khoản',   '/admin/cinema/users',     'users'],
 ];
 ?>
 <!DOCTYPE html>

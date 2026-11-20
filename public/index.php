@@ -40,6 +40,8 @@ function view(string $name, array $data = []): string
     return ob_get_clean();
 }
 
+define('APP_ENTRY', true);   // các view admin kiểm tra cờ này để không bị mở trực tiếp bằng URL
+session_set_cookie_params(['httponly' => true, 'samesite' => 'Lax']);
 session_start();
 require __DIR__ . '/../app/Core/Database.php';
 require __DIR__ . '/../app/Core/helpers.php';
@@ -60,7 +62,8 @@ $adminAuth = new AdminAuthController();
 $path      = rtrim($path, '/') ?: '/';
 
 // Khu vực quản trị: chưa đăng nhập admin thì chuyển về trang đăng nhập admin
-if (strpos($path, '/admin/cinema') === 0 && !isAdmin()) {
+// Chặn TẤT CẢ /admin/* (trừ /admin/login và /admin/logout) cho người dùng thường
+if (strpos($path, '/admin') === 0 && !in_array($path, ['/admin/login', '/admin/logout']) && !isAdmin()) {
     redirect('/admin/login');
 }
 
@@ -85,6 +88,7 @@ switch ($path) {
     case '/admin/cinema/cinemas':   echo $admin->cinemas();    break;
     case '/admin/cinema/showtimes': echo $admin->showtimes();  break;
     case '/admin/cinema/orders':    echo $admin->orders();     break;
+    case '/admin/cinema/users':     echo $admin->users();      break;
 
     default:
         http_response_code(404);

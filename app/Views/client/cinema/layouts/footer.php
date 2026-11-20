@@ -34,7 +34,9 @@
           <li><a href="#" class="hover:text-amber-400 transition-colors">Quy định đặt vé online</a></li>
           <li><a href="#" class="hover:text-amber-400 transition-colors">Chính sách bảo mật</a></li>
           <li><a href="#" class="hover:text-amber-400 transition-colors">Câu hỏi thường gặp (FAQ)</a></li>
+          <?php if (function_exists('isAdmin') && isAdmin()): ?>
           <li><a href="/admin/cinema" class="hover:text-amber-400 transition-colors">Cổng quản trị nội bộ</a></li>
+          <?php endif; ?>
         </ul>
       </div>
 

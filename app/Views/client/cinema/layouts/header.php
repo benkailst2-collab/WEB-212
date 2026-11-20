@@ -72,11 +72,13 @@ $h = fn($v) => htmlspecialchars((string) $v, ENT_QUOTES, 'UTF-8');
 
       <!-- Right actions -->
       <div class="flex items-center gap-3">
-        <!-- Chuyển sang Admin -->
+        <!-- Chuyển sang Admin (chỉ hiện cho admin) -->
+        <?php if (function_exists('isAdmin') && isAdmin()): ?>
         <a href="/admin/cinema" class="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gray-900 border border-gray-700 hover:border-amber-500/50 text-xs font-medium text-gray-300 hover:text-amber-400 transition-all shadow-sm">
           <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
           <span>Trang Quản Trị</span>
         </a>
+        <?php endif; ?>
 
         <!-- Tài khoản: đăng nhập / đăng ký hoặc tên + đăng xuất -->
         <?php $__u = $_SESSION['user'] ?? null; ?>
@@ -110,10 +112,12 @@ $h = fn($v) => htmlspecialchars((string) $v, ENT_QUOTES, 'UTF-8');
         <a href="/login" class="block px-3 py-2 rounded-lg text-sm font-medium text-gray-300 hover:bg-gray-800">Đăng nhập</a>
         <a href="/register" class="block px-3 py-2 rounded-lg text-sm font-medium text-gray-300 hover:bg-gray-800">Đăng ký</a>
       <?php endif; ?>
+      <?php if (function_exists('isAdmin') && isAdmin()): ?>
       <a href="/admin/cinema" class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold text-amber-400 border border-amber-500/30 bg-amber-500/10 mt-2">
         <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
         Vào Trang Quản Trị (Light Mode)
       </a>
+      <?php endif; ?>
     </div>
   </header>
 
