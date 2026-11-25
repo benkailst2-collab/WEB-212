@@ -1,8 +1,7 @@
 -- =====================================================================
--- cinema_db.sql - CSDL cho dự án MovieGo (đặt vé xem phim)
+-- cinema_db.sql - CSDL cho dự án MovieGo (đặt vé xem phim + Khuyến mãi + Tích điểm)
 -- MySQL 8 / MariaDB 10.4+ (XAMPP, Laragon đều chạy được)
 -- Cách dùng: phpMyAdmin -> Import -> chọn file này (file tự tạo DB cinema_db)
--- Dữ liệu mẫu khớp với mảng mock trong các view admin/client hiện tại.
 -- =====================================================================
 
 CREATE DATABASE IF NOT EXISTS cinema_db
@@ -10,22 +9,24 @@ CREATE DATABASE IF NOT EXISTS cinema_db
 USE cinema_db;
 
 SET FOREIGN_KEY_CHECKS = 0;
-DROP TABLE IF EXISTS order_combos, order_seats, orders, promotions, combos,
+DROP TABLE IF EXISTS point_transactions, order_combos, order_seats, orders, promotions, combos,
                      showtimes, seats, seat_types, screens, cinemas,
                      movie_genres, genres, movies, users;
 SET FOREIGN_KEY_CHECKS = 1;
 
 -- ---------------------------------------------------------------------
--- 1. NGƯỜI DÙNG (khách hàng + admin)
+-- 1. NGƯỜI DÙNG (khách hàng + admin + điểm thưởng)
 -- ---------------------------------------------------------------------
 CREATE TABLE users (
-  id            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  full_name     VARCHAR(100) NOT NULL,
-  email         VARCHAR(150) NOT NULL UNIQUE,
-  phone         VARCHAR(20)  NULL,
-  password_hash VARCHAR(255) NOT NULL,
-  role          ENUM('customer','admin') NOT NULL DEFAULT 'customer',
-  created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+  id             INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  full_name      VARCHAR(100) NOT NULL,
+  email          VARCHAR(150) NOT NULL UNIQUE,
+  phone          VARCHAR(20)  NULL,
+  password_hash  VARCHAR(255) NOT NULL,
+  role           ENUM('customer','admin') NOT NULL DEFAULT 'customer',
+  points_balance INT UNSIGNED NOT NULL DEFAULT 0,
+  total_spent    BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  created_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
 -- ---------------------------------------------------------------------
@@ -82,8 +83,6 @@ CREATE TABLE screens (
   FOREIGN KEY (cinema_id) REFERENCES cinemas(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
--- Loại ghế: giá ghế = giá cơ bản của suất chiếu + phụ thu
--- (2D 75.000 -> thường 75.000 / VIP 95.000 / đôi 160.000 như seats.php)
 CREATE TABLE seat_types (
   code      VARCHAR(20) PRIMARY KEY,
   name      VARCHAR(50) NOT NULL,
@@ -132,6 +131,7 @@ CREATE TABLE combos (
 CREATE TABLE promotions (
   id             INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   code           VARCHAR(30) NOT NULL UNIQUE,
+  description    VARCHAR(255) NULL,
   discount_type  ENUM('percent','fixed') NOT NULL DEFAULT 'percent',
   discount_value INT UNSIGNED NOT NULL,
   expires_at     DATETIME NULL,
@@ -139,33 +139,34 @@ CREATE TABLE promotions (
 ) ENGINE=InnoDB;
 
 -- ---------------------------------------------------------------------
--- 6. ĐƠN ĐẶT VÉ
+-- 6. ĐƠN ĐẶT VÉ & LỊCH SỬ ĐIỂM THƯỞNG
 -- ---------------------------------------------------------------------
 CREATE TABLE orders (
-  id             INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  code           VARCHAR(30) NOT NULL UNIQUE COMMENT 'vd ORD-20261101-001',
-  user_id        INT UNSIGNED NULL COMMENT 'NULL = khách vãng lai',
-  showtime_id    INT UNSIGNED NOT NULL,
-  customer_name  VARCHAR(100) NOT NULL,
-  customer_phone VARCHAR(20)  NOT NULL,
-  customer_email VARCHAR(150) NULL,
-  promotion_id   INT UNSIGNED NULL,
-  tickets_total  INT UNSIGNED NOT NULL DEFAULT 0,
-  combos_total   INT UNSIGNED NOT NULL DEFAULT 0,
-  discount       INT UNSIGNED NOT NULL DEFAULT 0,
-  total          INT UNSIGNED NOT NULL DEFAULT 0,
-  payment_method ENUM('momo','vnpay','card','zalopay') NOT NULL DEFAULT 'momo',
-  status         ENUM('pending','completed','cancelled') NOT NULL DEFAULT 'pending',
-  expires_at     DATETIME NULL COMMENT 'hết hạn giữ ghế (10 phút)',
-  created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  code            VARCHAR(30) NOT NULL UNIQUE COMMENT 'vd ORD-20261101-001',
+  user_id         INT UNSIGNED NULL COMMENT 'NULL = khách vãng lai',
+  showtime_id     INT UNSIGNED NOT NULL,
+  customer_name   VARCHAR(100) NOT NULL,
+  customer_phone  VARCHAR(20)  NOT NULL,
+  customer_email  VARCHAR(150) NULL,
+  promotion_id    INT UNSIGNED NULL,
+  tickets_total   INT UNSIGNED NOT NULL DEFAULT 0,
+  combos_total    INT UNSIGNED NOT NULL DEFAULT 0,
+  discount        INT UNSIGNED NOT NULL DEFAULT 0,
+  points_used     INT UNSIGNED NOT NULL DEFAULT 0,
+  points_discount INT UNSIGNED NOT NULL DEFAULT 0,
+  points_earned   INT UNSIGNED NOT NULL DEFAULT 0,
+  total           INT UNSIGNED NOT NULL DEFAULT 0,
+  payment_method  ENUM('momo','vnpay','card','zalopay') NOT NULL DEFAULT 'momo',
+  status          ENUM('pending','completed','cancelled') NOT NULL DEFAULT 'pending',
+  expires_at      DATETIME NULL COMMENT 'hết hạn giữ ghế (10 phút)',
+  created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_orders_status (status, created_at),
   FOREIGN KEY (user_id)      REFERENCES users(id)      ON DELETE SET NULL,
   FOREIGN KEY (showtime_id)  REFERENCES showtimes(id),
   FOREIGN KEY (promotion_id) REFERENCES promotions(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
--- Mỗi ghế trong 1 suất chỉ bán được 1 lần (chống đặt trùng ghế).
--- Khi hủy đơn / hết hạn giữ ghế: xóa các dòng order_seats của đơn đó để nhả ghế.
 CREATE TABLE order_seats (
   id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   order_id    INT UNSIGNED NOT NULL,
@@ -188,16 +189,30 @@ CREATE TABLE order_combos (
   FOREIGN KEY (combo_id) REFERENCES combos(id)
 ) ENGINE=InnoDB;
 
+CREATE TABLE point_transactions (
+  id            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  user_id       INT UNSIGNED NOT NULL,
+  order_id      INT UNSIGNED NULL,
+  type          ENUM('earn','redeem','refund','adjust') NOT NULL,
+  points        INT NOT NULL COMMENT 'dương = cộng, âm = trừ',
+  balance_after INT UNSIGNED NOT NULL,
+  note          VARCHAR(255) NULL,
+  created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_pt_user (user_id, created_at),
+  FOREIGN KEY (user_id)  REFERENCES users(id)  ON DELETE CASCADE,
+  FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
 
 -- =====================================================================
 -- DỮ LIỆU MẪU
 -- =====================================================================
 
--- Tài khoản mẫu: mật khẩu của cả 3 tài khoản là "password" (nhớ đổi khi triển khai thật)
-INSERT INTO users (full_name, email, phone, password_hash, role) VALUES
-('Quản trị viên',  'admin@moviego.vn',        '0900000000', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin'),
-('Nguyễn Văn An',  'nguyenvanan@gmail.com',    '0912345678', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'customer'),
-('Trần Thị Bích',  'tranthibich@gmail.com',    '0987654321', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'customer');
+-- Tài khoản mẫu: mật khẩu của cả 3 tài khoản là "password"
+INSERT INTO users (full_name, email, phone, password_hash, role, points_balance) VALUES
+('Quản trị viên',  'admin@moviego.vn',        '0900000000', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin', 0),
+('Nguyễn Văn An',  'nguyenvanan@gmail.com',    '0912345678', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'customer', 50),
+('Trần Thị Bích',  'tranthibich@gmail.com',    '0987654321', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'customer', 50);
 
 INSERT INTO movies (id, title, poster, backdrop, description, duration, rating, age_rating, release_date, director, cast_list, language, status) VALUES
 (1, 'Avengers: Doomsday',
@@ -248,7 +263,6 @@ INSERT INTO cinemas (id, name, address, city) VALUES
 (3, 'MovieGo Hà Nội',   'Vincom Center, 191 Bà Triệu',   'Hà Nội'),
 (4, 'MovieGo Đà Nẵng',  'Vincom Plaza, 910A Ngô Quyền',  'Đà Nẵng');
 
--- Số phòng theo trang admin: Q1 = 8, Q7 = 10, Hà Nội = 12, Đà Nẵng = 6
 INSERT INTO screens (cinema_id, name)
 SELECT c.id, CONCAT('Phòng ', n.num)
 FROM cinemas c
@@ -262,7 +276,6 @@ INSERT INTO seat_types (code, name, surcharge) VALUES
 ('vip',      'Ghế VIP',    20000),
 ('couple',   'Ghế đôi',    85000);
 
--- Mỗi phòng: hàng A-H x 12 ghế (giống seats.php). D,E,F = VIP; H = ghế đôi
 INSERT INTO seats (screen_id, row_label, seat_number, seat_type)
 SELECT s.id, r.row_label, n.num,
        CASE WHEN r.row_label IN ('D','E','F') THEN 'vip'
@@ -275,7 +288,6 @@ CROSS JOIN (SELECT 1 num UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 
             UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8
             UNION ALL SELECT 9 UNION ALL SELECT 10 UNION ALL SELECT 11 UNION ALL SELECT 12) n;
 
--- Suất chiếu mẫu (ngày chiếu = hôm nay lúc import)
 INSERT INTO showtimes (id, movie_id, screen_id, starts_at, format, base_price) VALUES
 (1, 1, (SELECT id FROM screens WHERE cinema_id=1 AND name='Phòng 1'), CONCAT(CURDATE(),' 10:00:00'), '2D',   75000),
 (2, 1, (SELECT id FROM screens WHERE cinema_id=1 AND name='Phòng 2'), CONCAT(CURDATE(),' 13:30:00'), '3D',   95000),
@@ -291,12 +303,12 @@ INSERT INTO combos (id, name, description, icon, price) VALUES
 (3, 'Combo Family',  '2 Bắp lớn + 4 Nước ngọt',   '🍿🍿🥤', 199000),
 (4, 'Nước ngọt lớn', 'Coca-Cola / Pepsi / Sprite', '🥤',   35000);
 
--- Mã giảm giá gợi ý ở checkout.php (CINEMA20, VIP10) - mức giảm là giả định, sửa theo ý bạn
-INSERT INTO promotions (code, discount_type, discount_value) VALUES
-('CINEMA20', 'percent', 20),
-('VIP10',    'percent', 10);
+INSERT INTO promotions (code, description, discount_type, discount_value, is_active) VALUES
+('CINEMA20',   'Giảm 20% tổng hóa đơn cho mọi đơn đặt vé', 'percent', 20, 1),
+('VIP10',      'Ưu đãi thành viên VIP giảm ngay 10%',      'percent', 10, 1),
+('CHAOBAN50K', 'Giảm trực tiếp 50.000đ cho đơn đặt vé',    'fixed',   50000, 1),
+('MOVIEFREE',  'Giảm trực tiếp 30.000đ vé xem phim cuối tuần', 'fixed', 30000, 1);
 
--- Đơn hàng mẫu (4 đơn như trang admin)
 INSERT INTO orders (code, user_id, showtime_id, customer_name, customer_phone, customer_email,
                     tickets_total, combos_total, total, payment_method, status, created_at) VALUES
 ('ORD-20261101-001', 2, 1, 'Nguyễn Văn An', '0912345678', 'nguyenvanan@gmail.com', 190000, 109000, 299000, 'momo',    'completed', '2026-11-01 08:30:00'),
@@ -304,8 +316,6 @@ INSERT INTO orders (code, user_id, showtime_id, customer_name, customer_phone, c
 ('ORD-20261102-001', NULL, 5, 'Lê Minh Tuấn',    '0903112233', NULL,                  140000, 158000, 298000, 'card',    'pending',   '2026-11-02 07:45:00'),
 ('ORD-20261102-002', NULL, 6, 'Phạm Hoàng Yến',  '0934556677', NULL,                  130000,      0, 130000, 'zalopay', 'cancelled', '2026-11-02 11:00:00');
 
--- Ghế của từng đơn (giá = giá cơ bản suất chiếu + phụ thu loại ghế)
--- Đơn ...-002 (đã hủy) không giữ ghế để ghế được nhả lại
 INSERT INTO order_seats (order_id, showtime_id, seat_id, price)
 SELECT o.id, o.showtime_id, se.id, st.base_price + sty.surcharge
 FROM orders o
@@ -323,3 +333,5 @@ FROM (SELECT 'ORD-20261101-001' code, 2 combo_id, 1 qty
       UNION ALL SELECT 'ORD-20261102-001', 1, 2) v
 JOIN orders o ON o.code = v.code
 JOIN combos c ON c.id = v.combo_id;
+
+UPDATE users u SET total_spent = (SELECT COALESCE(SUM(o.total),0) FROM orders o WHERE o.user_id = u.id AND o.status = 'completed');

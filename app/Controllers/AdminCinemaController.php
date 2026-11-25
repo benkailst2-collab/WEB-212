@@ -2,6 +2,7 @@
 namespace App\Controllers;
 
 use App\Core\Database;
+use App\Core\Loyalty;
 use PDO;
 
 /**
@@ -17,7 +18,6 @@ class AdminCinemaController
     {
         $pdo = Database::pdo();
 
-        // 1. Chỉ số tổng hợp
         $totalRevenue = (float)$pdo->query("SELECT COALESCE(SUM(total), 0) FROM orders WHERE status = 'completed'")->fetchColumn();
         $totalOrders  = (int)$pdo->query("SELECT COUNT(*) FROM orders")->fetchColumn();
         $totalTickets = (int)$pdo->query(
@@ -28,7 +28,6 @@ class AdminCinemaController
         $totalUsers   = (int)$pdo->query("SELECT COUNT(*) FROM users WHERE role = 'customer'")->fetchColumn();
         $totalMovies  = (int)$pdo->query("SELECT COUNT(*) FROM movies WHERE status = 'now_showing'")->fetchColumn();
 
-        // 2. Đơn hàng gần đây
         $recentOrders = $pdo->query(
             "SELECT o.*, m.title AS movie_title, s.starts_at, c.name AS cinema_name
              FROM orders o
@@ -39,7 +38,6 @@ class AdminCinemaController
              ORDER BY o.created_at DESC LIMIT 6"
         )->fetchAll();
 
-        // 3. Dữ liệu biểu đồ doanh thu 7 ngày gần nhất
         $revenue7Days = $pdo->query(
             "SELECT DATE(created_at) AS order_date, COALESCE(SUM(total), 0) AS daily_total
              FROM orders
@@ -138,7 +136,6 @@ class AdminCinemaController
             }
         }
 
-        // Lấy danh sách phim kèm số lượng suất chiếu
         $movies = $pdo->query(
             "SELECT m.*, GROUP_CONCAT(DISTINCT g.name SEPARATOR ', ') AS genre_names,
                     COUNT(DISTINCT s.id) AS showtimes_count
@@ -174,7 +171,6 @@ class AdminCinemaController
                     $stmt->execute([$name, $address, $city, $phone]);
                     $cinemaId = $pdo->lastInsertId();
 
-                    // Tự động tạo 2 phòng chiếu mẫu
                     $screenStmt = $pdo->prepare("INSERT INTO screens (cinema_id, name) VALUES (?, ?)");
                     $screenStmt->execute([$cinemaId, 'Phòng 1']);
                     $screenStmt->execute([$cinemaId, 'Phòng 2']);
@@ -191,7 +187,6 @@ class AdminCinemaController
             }
         }
 
-        // Lấy danh sách rạp kèm số lượng phòng chiếu và tổng số ghế
         $cinemas = $pdo->query(
             "SELECT c.*, COUNT(DISTINCT sc.id) AS screens_count, COUNT(DISTINCT se.id) AS seats_count
              FROM cinemas c
@@ -239,7 +234,6 @@ class AdminCinemaController
             }
         }
 
-        // Lấy danh sách suất chiếu
         $showtimes = $pdo->query(
             "SELECT s.*, m.title AS movie_title, c.name AS cinema_name, sc.name AS screen_name
              FROM showtimes s
@@ -249,7 +243,6 @@ class AdminCinemaController
              ORDER BY s.starts_at DESC"
         )->fetchAll();
 
-        // Lấy danh sách phim và phòng chiếu để dùng trong Modal tạo suất chiếu
         $moviesList = $pdo->query("SELECT id, title FROM movies ORDER BY title ASC")->fetchAll();
         $screensList = $pdo->query(
             "SELECT sc.id, sc.name AS screen_name, c.name AS cinema_name
@@ -262,7 +255,7 @@ class AdminCinemaController
     }
 
     /**
-     * Quản lý Đơn hàng: Cập nhật trạng thái, Hủy đơn
+     * Quản lý Đơn hàng: Cập nhật trạng thái, Nhả ghế & Hoàn điểm khi hủy
      */
     public function orders()
     {
@@ -275,9 +268,29 @@ class AdminCinemaController
                 $id = (int)($_POST['id'] ?? 0);
                 $status = trim($_POST['status'] ?? 'completed');
                 if ($id && in_array($status, ['pending', 'completed', 'cancelled'])) {
-                    $stmt = $pdo->prepare("UPDATE orders SET status = ? WHERE id = ?");
-                    $stmt->execute([$status, $id]);
-                    $msg = "Đã cập nhật trạng thái đơn sang '{$status}'!";
+                    $pdo->beginTransaction();
+                    try {
+                        $old = $pdo->prepare("SELECT status FROM orders WHERE id = ? FOR UPDATE");
+                        $old->execute([$id]);
+                        $oldStatus = $old->fetchColumn();
+
+                        $stmt = $pdo->prepare("UPDATE orders SET status = ? WHERE id = ?");
+                        $stmt->execute([$status, $id]);
+
+                        if ($status === 'cancelled' && $oldStatus !== 'cancelled') {
+                            $pdo->prepare("DELETE FROM order_seats WHERE order_id = ?")->execute([$id]);
+                            if ($oldStatus === 'completed') {
+                                Loyalty::refundOrder($pdo, $id);
+                            }
+                        }
+                        $pdo->commit();
+                        $msg = "Đã cập nhật trạng thái đơn sang '{$status}'!";
+                    } catch (\Exception $e) {
+                        if ($pdo->inTransaction()) {
+                            $pdo->rollBack();
+                        }
+                        $msg = 'Không cập nhật được đơn: ' . $e->getMessage();
+                    }
                 }
             } elseif ($action === 'delete') {
                 $id = (int)($_POST['id'] ?? 0);
@@ -289,7 +302,6 @@ class AdminCinemaController
             }
         }
 
-        // Lấy danh sách toàn bộ đơn hàng
         $orders = $pdo->query(
             "SELECT o.*, m.title AS movie_title, c.name AS cinema_name, s.starts_at,
                     GROUP_CONCAT(CONCAT(se.row_label, se.seat_number) SEPARATOR ', ') AS seats_list
@@ -308,7 +320,7 @@ class AdminCinemaController
     }
 
     /**
-     * Quản lý Người dùng & Khách hàng
+     * Quản lý Người dùng, Phân quyền & Điều chỉnh điểm thưởng
      */
     public function users()
     {
@@ -326,6 +338,10 @@ class AdminCinemaController
                     $stmt->execute([$role, $id]);
                     $msg = 'Đã cập nhật vai trò người dùng!';
                 }
+            } elseif ($action === 'update_points' && $id) {
+                $points = max(0, (int)($_POST['points_balance'] ?? 0));
+                Loyalty::adjustPoints($pdo, $id, $points);
+                $msg = 'Đã cập nhật điểm thưởng & ghi lịch sử giao dịch!';
             } elseif ($action === 'delete' && $id) {
                 $stmt = $pdo->prepare("DELETE FROM users WHERE id = ?");
                 $stmt->execute([$id]);
@@ -336,5 +352,75 @@ class AdminCinemaController
         $users = $pdo->query("SELECT * FROM users ORDER BY id DESC")->fetchAll();
 
         return view('admin/cinema/users', compact('users', 'msg'));
+    }
+
+    /**
+     * Quản lý Mã Giảm Giá & Khuyến Mãi
+     */
+    public function promotions()
+    {
+        $pdo = Database::pdo();
+        $msg = '';
+
+        if (isPost()) {
+            $action = $_POST['action'] ?? '';
+            if ($action === 'add') {
+                $code          = strtoupper(trim($_POST['code'] ?? ''));
+                $description   = trim($_POST['description'] ?? '');
+                $discountType  = trim($_POST['discount_type'] ?? 'percent');
+                $discountValue = (int)($_POST['discount_value'] ?? 0);
+                $expiresAt     = !empty($_POST['expires_at']) ? $_POST['expires_at'] : null;
+
+                if ($code !== '' && $discountValue > 0 && in_array($discountType, ['percent', 'fixed'])) {
+                    try {
+                        $stmt = $pdo->prepare(
+                            "INSERT INTO promotions (code, description, discount_type, discount_value, expires_at, is_active)
+                             VALUES (?, ?, ?, ?, ?, 1)"
+                        );
+                        $stmt->execute([$code, $description, $discountType, $discountValue, $expiresAt]);
+                        $msg = 'Đã tạo mã khuyến mãi mới thành công!';
+                    } catch (\PDOException $e) {
+                        $msg = 'Lỗi: Mã khuyến mãi này đã tồn tại trong CSDL.';
+                    }
+                }
+            } elseif ($action === 'edit') {
+                $id            = (int)($_POST['id'] ?? 0);
+                $code          = strtoupper(trim($_POST['code'] ?? ''));
+                $description   = trim($_POST['description'] ?? '');
+                $discountType  = trim($_POST['discount_type'] ?? 'percent');
+                $discountValue = (int)($_POST['discount_value'] ?? 0);
+                $expiresAt     = !empty($_POST['expires_at']) ? $_POST['expires_at'] : null;
+
+                if ($id && $code !== '' && $discountValue > 0 && in_array($discountType, ['percent', 'fixed'])) {
+                    try {
+                        $stmt = $pdo->prepare(
+                            "UPDATE promotions SET code = ?, description = ?, discount_type = ?, discount_value = ?, expires_at = ? WHERE id = ?"
+                        );
+                        $stmt->execute([$code, $description, $discountType, $discountValue, $expiresAt, $id]);
+                        $msg = 'Đã cập nhật mã khuyến mãi!';
+                    } catch (\PDOException $e) {
+                        $msg = 'Lỗi: Mã khuyến mãi bị trùng với mã khác.';
+                    }
+                }
+            } elseif ($action === 'toggle') {
+                $id = (int)($_POST['id'] ?? 0);
+                if ($id) {
+                    $stmt = $pdo->prepare("UPDATE promotions SET is_active = 1 - is_active WHERE id = ?");
+                    $stmt->execute([$id]);
+                    $msg = 'Đã thay đổi trạng thái kích hoạt của mã khuyến mãi!';
+                }
+            } elseif ($action === 'delete') {
+                $id = (int)($_POST['id'] ?? 0);
+                if ($id) {
+                    $stmt = $pdo->prepare("DELETE FROM promotions WHERE id = ?");
+                    $stmt->execute([$id]);
+                    $msg = 'Đã xóa mã khuyến mãi!';
+                }
+            }
+        }
+
+        $promotions = $pdo->query("SELECT * FROM promotions ORDER BY id DESC")->fetchAll();
+
+        return view('admin/cinema/promotions', compact('promotions', 'msg'));
     }
 }
