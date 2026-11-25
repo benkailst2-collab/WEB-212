@@ -12,9 +12,10 @@ $menuItems = [
   'dashboard'  => ['Dashboard Thống kê', '/admin/cinema',           'layout-dashboard'],
   'movies'     => ['Quản lý Phim',        '/admin/cinema/movies',    'film'],
   'cinemas'    => ['Quản lý Cụm Rạp',     '/admin/cinema/cinemas',   'building-2'],
-  'showtimes'  => ['Quản lý Suất chiếu',  '/admin/cinema/showtimes', 'calendar'],
-  'orders'     => ['Quản lý Đơn hàng',    '/admin/cinema/orders',    'shopping-cart'],
-  'users'      => ['Quản lý Tài khoản',   '/admin/cinema/users',     'users'],
+  'showtimes'  => ['Quản lý Suất chiếu',  '/admin/cinema/showtimes',  'calendar'],
+  'orders'     => ['Quản lý Đơn hàng',    '/admin/cinema/orders',     'shopping-cart'],
+  'promotions' => ['Khuyến Mãi & Voucher','/admin/cinema/promotions', 'tag'],
+  'users'      => ['Quản lý Tài khoản',   '/admin/cinema/users',      'users'],
 ];
 ?>
 <!DOCTYPE html>

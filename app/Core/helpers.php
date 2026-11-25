@@ -19,6 +19,18 @@ function redirect(string $path): void
 
 function currentUser(): ?array
 {
+    if (empty($_SESSION['user']['id'])) {
+        return null;
+    }
+    try {
+        $st = \App\Core\Database::pdo()->prepare('SELECT id, full_name, email, phone, role, points_balance, total_spent FROM users WHERE id = ? LIMIT 1');
+        $st->execute([$_SESSION['user']['id']]);
+        $u = $st->fetch();
+        if ($u) {
+            $_SESSION['user'] = $u;
+            return $u;
+        }
+    } catch (\Throwable $e) {}
     return $_SESSION['user'] ?? null;
 }
 

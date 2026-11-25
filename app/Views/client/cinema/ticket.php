@@ -137,8 +137,19 @@ $searched      = $searched ?? false;
       <div class="p-6 sm:p-8 bg-gray-950/60 flex flex-col sm:flex-row items-center justify-between gap-6">
         <div class="space-y-1 text-center sm:text-left text-xs">
           <p class="text-gray-400">Người đặt: <strong class="text-white"><?= htmlspecialchars($order['customer_name']) ?> (<?= htmlspecialchars($order['customer_phone']) ?>)</strong></p>
-          <p class="text-gray-500">Vui lòng có mặt tại rạp trước giờ chiếu 15 phút.</p>
+          <div class="py-1 text-[11px] text-gray-400 space-y-0.5">
+            <?php if (!empty($order['discount']) && $order['discount'] > 0): ?>
+              <p class="text-emerald-400">Voucher giảm giá <?= !empty($order['promo_code']) ? '(' . htmlspecialchars($order['promo_code']) . ')' : '' ?>: -<?= number_format($order['discount'], 0, ',', '.') ?>₫</p>
+            <?php endif; ?>
+            <?php if ((int)($order['points_used'] ?? 0) > 0): ?>
+              <p class="text-amber-400">Đã dùng <?= (int)$order['points_used'] ?> điểm (-<?= number_format((int)$order['points_discount'], 0, ',', '.') ?>₫)</p>
+            <?php endif; ?>
+            <?php if ((int)($order['points_earned'] ?? 0) > 0): ?>
+              <p class="text-emerald-400 font-semibold">⭐ Điểm tích lũy từ đơn này: +<?= (int)$order['points_earned'] ?> điểm</p>
+            <?php endif; ?>
+          </div>
           <p class="text-amber-400 font-bold pt-1">Tổng tiền: <?= number_format($order['total'], 0, ',', '.') ?>₫ (Thanh toán qua <?= strtoupper(htmlspecialchars($order['payment_method'])) ?>)</p>
+          <p class="text-gray-500 text-[10px]">Vui lòng có mặt tại rạp trước giờ chiếu 15 phút.</p>
         </div>
 
         <!-- Dynamic SVG QR Code with Order Code -->

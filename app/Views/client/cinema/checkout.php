@@ -1,20 +1,23 @@
 <?php
 /**
- * app/Views/client/cinema/checkout.php - Trang Thanh Toán Đặt Vé (Gửi POST vào CSDL thật)
+ * app/Views/client/cinema/checkout.php - Trang Thanh Toán Đặt Vé (Voucher nhanh + Điểm thưởng Loyalty + CSRF)
  */
 $pageTitle = 'Thanh Toán Vé Xem Phim - MovieGo';
 include __DIR__ . '/layouts/header.php';
 
-$showtime     = $showtime ?? [];
-$showtimeId   = (int)($showtimeId ?? 1);
-$seatList     = $seatList ?? ['D5', 'D6'];
-$seatsParam   = $seatsParam ?? implode(', ', $seatList);
-$combosParam  = $combosParam ?? '{}';
-$comboSummary = $comboSummary ?? [];
-$ticketTotal  = (int)($ticketTotal ?? 150000);
-$comboTotal   = (int)($comboTotal ?? 0);
-$grandTotal   = (int)($grandTotal ?? ($ticketTotal + $comboTotal));
-$user         = $user ?? currentUser();
+$showtime        = $showtime ?? [];
+$showtimeId      = (int)($showtimeId ?? 1);
+$seatList        = $seatList ?? ['D5', 'D6'];
+$seatsParam      = $seatsParam ?? implode(', ', $seatList);
+$combosParam     = $combosParam ?? '{}';
+$comboSummary    = $comboSummary ?? [];
+$ticketTotal     = (int)($ticketTotal ?? 150000);
+$comboTotal      = (int)($comboTotal ?? 0);
+$grandTotal      = (int)($grandTotal ?? ($ticketTotal + $comboTotal));
+$user            = $user ?? (function_exists('currentUser') ? currentUser() : null);
+$availablePromos = $availablePromos ?? [];
+$promoMap        = $promoMap ?? [];
+$loyalty         = $loyalty ?? null;
 
 $defaultName  = $user['full_name'] ?? '';
 $defaultEmail = $user['email'] ?? '';
@@ -22,7 +25,6 @@ $defaultPhone = $user['phone'] ?? '';
 ?>
 
 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-  <!-- ─── Top Countdown & Stepper ─── -->
   <div class="flex flex-wrap items-center justify-between gap-4 mb-8">
     <a href="/cinema/seats?showtime_id=<?= $showtimeId ?>" class="inline-flex items-center gap-2 text-xs text-gray-400 hover:text-white">
       <i data-lucide="arrow-left" class="w-4 h-4"></i> Quay lại chọn ghế
@@ -36,11 +38,12 @@ $defaultPhone = $user['phone'] ?? '';
   </div>
 
   <form method="post" action="/cinema/checkout" id="checkout-form">
-    <!-- Hidden inputs truyền dữ liệu sang backend -->
     <input type="hidden" name="showtime_id" value="<?= $showtimeId ?>">
     <input type="hidden" name="seats" value="<?= htmlspecialchars($seatsParam) ?>">
     <input type="hidden" name="combos" value="<?= htmlspecialchars($combosParam) ?>">
+    <input type="hidden" name="csrf" value="<?= htmlspecialchars(csrf_token()) ?>">
     <input type="hidden" name="promo_code" id="hidden-promo-code" value="">
+    <input type="hidden" name="points_used" id="hidden-points" value="0">
 
     <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
       <!-- ─── Cột Form Trái (7 cols) ─── -->
@@ -116,17 +119,68 @@ $defaultPhone = $user['phone'] ?? '';
           </div>
         </div>
 
-        <!-- 3. Mã giảm giá -->
+        <!-- 3. Mã giảm giá / Voucher -->
         <div class="bg-gray-900 border border-gray-800 rounded-3xl p-6 shadow-xl">
           <h2 class="text-base font-bold text-white mb-3 flex items-center gap-2">
             <i data-lucide="tag" class="w-5 h-5 text-amber-400"></i>
             Mã giảm giá / Voucher
           </h2>
           <div class="flex gap-2">
-            <input type="text" id="promo-input" placeholder="Nhập CINEMA20 hoặc VIP10" class="flex-1 bg-gray-950 border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white uppercase focus:outline-none focus:border-amber-500">
+            <input type="text" id="promo-input" placeholder="Nhập mã giảm giá (VD: CINEMA20)" class="flex-1 bg-gray-950 border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white uppercase focus:outline-none focus:border-amber-500">
             <button type="button" onclick="applyPromo()" class="px-5 py-2.5 bg-gray-800 hover:bg-gray-700 text-amber-400 text-xs font-bold rounded-xl border border-gray-700">Áp dụng</button>
           </div>
           <p id="promo-feedback" class="text-xs mt-2 hidden"></p>
+
+          <?php if (!empty($availablePromos)): ?>
+            <div class="pt-3 mt-3 border-t border-gray-800">
+              <span class="text-[11px] text-gray-400 block mb-2 font-medium">Chọn nhanh voucher đang có:</span>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <?php foreach ($availablePromos as $ap):
+                  $dText = $ap['discount_type'] === 'percent' ? "Giảm {$ap['discount_value']}%" : "Giảm " . number_format($ap['discount_value'], 0, ',', '.') . "₫";
+                ?>
+                  <div onclick="selectPromoQuick('<?= htmlspecialchars($ap['code']) ?>')"
+                       class="p-2.5 rounded-xl bg-gray-950 hover:bg-gray-800/80 border border-gray-800 hover:border-amber-500/50 cursor-pointer flex items-center justify-between transition-all">
+                    <div>
+                      <div class="flex items-center gap-1.5">
+                        <span class="font-mono font-black text-amber-400 text-xs"><?= htmlspecialchars($ap['code']) ?></span>
+                        <span class="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[10px] font-bold"><?= $dText ?></span>
+                      </div>
+                      <p class="text-[10px] text-gray-400 line-clamp-1 mt-0.5"><?= htmlspecialchars($ap['description'] ?: 'Áp dụng cho đơn đặt vé') ?></p>
+                    </div>
+                    <span class="text-[10px] text-amber-400 font-bold ml-2">Chọn</span>
+                  </div>
+                <?php endforeach; ?>
+              </div>
+            </div>
+          <?php endif; ?>
+        </div>
+
+        <!-- 4. Điểm thưởng -->
+        <div class="bg-gray-900 border border-gray-800 rounded-3xl p-6 shadow-xl">
+          <h2 class="text-base font-bold text-white mb-3 flex items-center gap-2">
+            <i data-lucide="star" class="w-5 h-5 text-amber-400"></i>
+            Điểm thưởng MovieGo
+          </h2>
+          <?php if ($loyalty): ?>
+            <p class="text-xs text-gray-400 mb-3">
+              Hạng <strong class="text-amber-400"><?= htmlspecialchars($loyalty['tier']) ?></strong> •
+              Số dư: <strong class="text-white"><?= number_format($loyalty['balance'], 0, ',', '.') ?> điểm</strong>
+              (1 điểm = <?= number_format(\App\Core\Loyalty::POINT_VALUE, 0, ',', '.') ?>₫)
+            </p>
+            <div class="flex gap-2">
+              <input type="number" id="points-input" min="0" step="1" value="0" placeholder="Số điểm muốn dùng"
+                     class="flex-1 bg-gray-950 border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500">
+              <button type="button" onclick="useMaxPoints()" class="px-5 py-2.5 bg-gray-800 hover:bg-gray-700 text-amber-400 text-xs font-bold rounded-xl border border-gray-700">Dùng tối đa</button>
+            </div>
+            <p id="points-feedback" class="text-xs mt-2 text-gray-500"></p>
+          <?php else: ?>
+            <p class="text-xs text-gray-400">
+              <a href="/login" class="text-amber-400 font-bold hover:underline">Đăng nhập</a> hoặc
+              <a href="/register" class="text-amber-400 font-bold hover:underline">đăng ký</a>
+              để tích điểm cho đơn này và dùng điểm giảm giá cho lần sau.
+            </p>
+          <?php endif; ?>
+          <p class="text-xs mt-3 text-amber-300 hidden" id="earn-row">Đơn này sẽ tích: <strong id="earn-val">+0</strong> điểm</p>
         </div>
       </div>
 
@@ -171,6 +225,10 @@ $defaultPhone = $user['phone'] ?? '';
               <span>Giảm giá Voucher:</span>
               <span id="discount-val">-0₫</span>
             </div>
+            <div class="flex justify-between text-emerald-400 font-medium hidden" id="points-row">
+              <span>Dùng điểm thưởng:</span>
+              <span id="points-val">-0₫</span>
+            </div>
           </div>
 
           <div class="pt-4 border-t border-gray-800 mb-6">
@@ -191,7 +249,6 @@ $defaultPhone = $user['phone'] ?? '';
 </div>
 
 <script>
-  // Countdown 10:00
   let timeLeft = 600;
   setInterval(() => {
     if (timeLeft <= 0) return;
@@ -204,41 +261,114 @@ $defaultPhone = $user['phone'] ?? '';
     }
   }, 1000);
 
-  // Voucher
-  let originalTotal = <?= $grandTotal ?>;
+  const TICKET_TOTAL = <?= (int)$ticketTotal ?>;
+  const COMBO_TOTAL  = <?= (int)$comboTotal ?>;
+  const BASE_TOTAL   = TICKET_TOTAL + COMBO_TOTAL;
+  const PROMOS       = <?= json_encode($promoMap, JSON_UNESCAPED_UNICODE) ?>;
+  const LOGGED_IN    = <?= $loyalty ? 'true' : 'false' ?>;
+  const BALANCE      = <?= (int)($loyalty['balance'] ?? 0) ?>;
+  const POINT_VALUE  = <?= \App\Core\Loyalty::POINT_VALUE ?>;
+  const MIN_REDEEM   = <?= \App\Core\Loyalty::MIN_REDEEM ?>;
+  const MAX_PCT      = <?= \App\Core\Loyalty::MAX_REDEEM_PERCENT ?>;
+  const EARN_TICKET  = <?= \App\Core\Loyalty::EARN_TICKET_PCT ?>;
+  const EARN_COMBO   = <?= \App\Core\Loyalty::EARN_COMBO_PCT ?>;
+
+  const vnd = n => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(n);
+  let promoCode = '';
+
+  function promoDiscount() {
+    const p = PROMOS[promoCode];
+    if (!p) return 0;
+    const d = p.type === 'percent' ? Math.round(BASE_TOTAL * p.value / 100) : p.value;
+    return Math.min(d, BASE_TOTAL);
+  }
+
+  function maxPoints(afterPromo) {
+    if (!LOGGED_IN) return 0;
+    const cap = Math.floor(Math.floor(afterPromo * MAX_PCT / 100) / POINT_VALUE);
+    const max = Math.min(BALANCE, cap);
+    return max >= MIN_REDEEM ? max : 0;
+  }
+
+  function recalc() {
+    const discount   = promoDiscount();
+    const afterPromo = BASE_TOTAL - discount;
+    const max        = maxPoints(afterPromo);
+
+    let pts = 0;
+    const input = document.getElementById('points-input');
+    const pfb   = document.getElementById('points-feedback');
+    if (input) {
+      pts = Math.max(0, parseInt(input.value, 10) || 0);
+      if (pts > max) { pts = max; input.value = max; }
+      if (max === 0) {
+        pfb.innerText = BALANCE < MIN_REDEEM
+          ? 'Cần tối thiểu ' + MIN_REDEEM + ' điểm để sử dụng.'
+          : 'Đơn hàng chưa đủ giá trị để dùng điểm.';
+      } else {
+        pfb.innerText = 'Dùng tối đa ' + max + ' điểm cho đơn này (không quá ' + MAX_PCT + '% giá trị đơn).';
+      }
+      if (pts > 0 && pts < MIN_REDEEM) { pts = 0; }
+    }
+
+    const pointsDiscount = pts * POINT_VALUE;
+    const total = Math.max(0, afterPromo - pointsDiscount);
+
+    document.getElementById('discount-row').classList.toggle('hidden', discount === 0);
+    document.getElementById('discount-val').innerText = '-' + vnd(discount);
+    document.getElementById('points-row').classList.toggle('hidden', pts === 0);
+    document.getElementById('points-val').innerText = '-' + vnd(pointsDiscount);
+    document.getElementById('final-total').innerText = vnd(total);
+    document.getElementById('hidden-promo-code').value = promoCode;
+    document.getElementById('hidden-points').value = pts;
+
+    if (LOGGED_IN && BASE_TOTAL > 0 && total > 0) {
+      const earn = Math.floor((TICKET_TOTAL * EARN_TICKET + COMBO_TOTAL * EARN_COMBO) * total / (BASE_TOTAL * 100 * POINT_VALUE));
+      document.getElementById('earn-val').innerText = '+' + earn;
+      document.getElementById('earn-row').classList.remove('hidden');
+    } else {
+      document.getElementById('earn-row').classList.add('hidden');
+    }
+  }
+
   function applyPromo() {
     const code = document.getElementById('promo-input').value.trim().toUpperCase();
     const fb = document.getElementById('promo-feedback');
-    const discountRow = document.getElementById('discount-row');
-    const discountVal = document.getElementById('discount-val');
-    const finalTotal = document.getElementById('final-total');
-    const hiddenPromo = document.getElementById('hidden-promo-code');
-
-    fb.classList.remove('hidden');
-
-    if (code === 'CINEMA20') {
-      fb.className = 'text-xs mt-2 text-emerald-400';
-      fb.innerText = 'Áp dụng thành công mã giảm 20.000₫!';
-      discountRow.classList.remove('hidden');
-      discountVal.innerText = '-20.000₫';
-      finalTotal.innerText = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(Math.max(0, originalTotal - 20000));
-      hiddenPromo.value = 'CINEMA20';
-    } else if (code === 'VIP10') {
-      const d = Math.round(originalTotal * 0.1);
-      fb.className = 'text-xs mt-2 text-emerald-400';
-      fb.innerText = 'Áp dụng thành công mã VIP giảm 10%!';
-      discountRow.classList.remove('hidden');
-      discountVal.innerText = '-' + new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(d);
-      finalTotal.innerText = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(Math.max(0, originalTotal - d));
-      hiddenPromo.value = 'VIP10';
-    } else {
-      fb.className = 'text-xs mt-2 text-red-400';
-      fb.innerText = 'Mã khuyến mãi không hợp lệ.';
-      discountRow.classList.add('hidden');
-      finalTotal.innerText = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(originalTotal);
-      hiddenPromo.value = '';
+    if (!code) {
+      promoCode = '';
+      fb.classList.add('hidden');
+      recalc();
+      return;
     }
+    fb.classList.remove('hidden');
+    const p = PROMOS[code];
+    if (p) {
+      promoCode = code;
+      fb.className = 'text-xs mt-2 text-emerald-400';
+      fb.innerText = 'Áp dụng thành công: ' + (p.type === 'percent' ? 'giảm ' + p.value + '%' : 'giảm ' + vnd(p.value)) + '!' + (p.desc ? ' (' + p.desc + ')' : '');
+    } else {
+      promoCode = '';
+      fb.className = 'text-xs mt-2 text-red-400';
+      fb.innerText = 'Mã khuyến mãi không hợp lệ hoặc đã hết hạn.';
+    }
+    recalc();
   }
+
+  function selectPromoQuick(code) {
+    document.getElementById('promo-input').value = code;
+    applyPromo();
+  }
+
+  function useMaxPoints() {
+    const input = document.getElementById('points-input');
+    if (!input) return;
+    input.value = maxPoints(BASE_TOTAL - promoDiscount());
+    recalc();
+  }
+
+  const pointsInput = document.getElementById('points-input');
+  if (pointsInput) pointsInput.addEventListener('input', recalc);
+  recalc();
 </script>
 
 <?php include __DIR__ . '/layouts/footer.php'; ?>

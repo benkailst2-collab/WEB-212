@@ -290,7 +290,7 @@ $basePrice = (int)($showtime['base_price'] ?? 75000);
     if (selectedSeats.length === 0) return;
     const seatParam = encodeURIComponent(selectedSeats.map(s => s.id).join(','));
     const comboParam = encodeURIComponent(JSON.stringify(selectedCombos));
-    window.location.href = `/cinema/checkout?showtime_id=<?= $showtimeId ?>&seats=${seatParam}&combos=${comboParam}`;
+    window.location.href = `<?= url('/cinema/checkout') ?>?showtime_id=<?= $showtimeId ?>&seats=${seatParam}&combos=${comboParam}`;
   }
 </script>
 

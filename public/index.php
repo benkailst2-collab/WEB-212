@@ -45,6 +45,7 @@ session_set_cookie_params(['httponly' => true, 'samesite' => 'Lax']);
 session_start();
 require __DIR__ . '/../app/Core/Database.php';
 require __DIR__ . '/../app/Core/helpers.php';
+require __DIR__ . '/../app/Core/Loyalty.php';
 require __DIR__ . '/../app/Controllers/CinemaController.php';
 require __DIR__ . '/../app/Controllers/AdminCinemaController.php';
 require __DIR__ . '/../app/Controllers/AuthController.php';
@@ -73,6 +74,8 @@ switch ($path) {
     case '/cinema/detail':          echo $client->detail();    break;
     case '/cinema/seats':           echo $client->seats();     break;
     case '/cinema/checkout':        echo $client->checkout();  break;
+    case '/cinema/promotions':      echo $client->promotions();break;
+    case '/cinema/points':          echo $client->points();    break;
     case '/cinema/ticket':          echo $client->ticket();    break;
     case '/cinema/spa':             echo $client->spa();       break;
 
@@ -88,6 +91,7 @@ switch ($path) {
     case '/admin/cinema/cinemas':   echo $admin->cinemas();    break;
     case '/admin/cinema/showtimes': echo $admin->showtimes();  break;
     case '/admin/cinema/orders':    echo $admin->orders();     break;
+    case '/admin/cinema/promotions':echo $admin->promotions(); break;
     case '/admin/cinema/users':     echo $admin->users();      break;
 
     default:

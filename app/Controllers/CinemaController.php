@@ -2,6 +2,7 @@
 namespace App\Controllers;
 
 use App\Core\Database;
+use App\Core\Loyalty;
 use PDO;
 
 /**
@@ -19,15 +20,13 @@ class CinemaController
         $search = trim($_GET['q'] ?? '');
         $selectedGenre = trim($_GET['genre'] ?? '');
 
-        // Lấy tất cả thể loại cho bộ lọc
         $genresList = $pdo->query("SELECT * FROM genres ORDER BY name ASC")->fetchAll();
 
-        // Truy vấn phim kèm thể loại
         $sql = "SELECT m.*, GROUP_CONCAT(g.name SEPARATOR ', ') AS genre_names
                 FROM movies m
                 LEFT JOIN movie_genres mg ON mg.movie_id = m.id
                 LEFT JOIN genres g ON g.id = mg.genre_id";
-        
+
         $params = [];
         $where = [];
 
@@ -68,11 +67,8 @@ class CinemaController
             ];
         }
 
-        // Tách phim đang chiếu và sắp chiếu
         $nowShowing = array_values(array_filter($movies, fn($m) => $m['status'] === 'now_showing'));
         $comingSoon = array_values(array_filter($movies, fn($m) => $m['status'] === 'coming_soon'));
-
-        // Phim nổi bật ở banner Hero
         $featured = !empty($nowShowing) ? $nowShowing[0] : (!empty($movies) ? $movies[0] : null);
 
         return view('client/cinema/home', compact(
@@ -94,7 +90,6 @@ class CinemaController
         $pdo = Database::pdo();
         $movieId = (int)($_GET['id'] ?? 1);
 
-        // Lấy thông tin phim
         $stmt = $pdo->prepare("SELECT * FROM movies WHERE id = ? LIMIT 1");
         $stmt->execute([$movieId]);
         $row = $stmt->fetch();
@@ -103,7 +98,6 @@ class CinemaController
             redirect('/cinema');
         }
 
-        // Lấy danh sách thể loại của phim
         $genreStmt = $pdo->prepare("SELECT g.name FROM genres g JOIN movie_genres mg ON mg.genre_id = g.id WHERE mg.movie_id = ?");
         $genreStmt->execute([$movieId]);
         $genres = $genreStmt->fetchAll(PDO::FETCH_COLUMN) ?: ['Điện ảnh'];
@@ -125,10 +119,8 @@ class CinemaController
             'language'    => $row['language'] ?: 'Tiếng Việt - Phụ đề',
         ];
 
-        // Lấy danh sách cụm rạp
         $cinemas = $pdo->query("SELECT * FROM cinemas ORDER BY id ASC")->fetchAll();
 
-        // Lấy toàn bộ suất chiếu của phim này
         $showStmt = $pdo->prepare(
             "SELECT s.*, sc.name AS screen_name, c.id AS cinema_id, c.name AS cinema_name
              FROM showtimes s
@@ -164,7 +156,6 @@ class CinemaController
         $pdo = Database::pdo();
         $showtimeId = (int)($_GET['showtime_id'] ?? 1);
 
-        // Lấy thông tin suất chiếu
         $stmt = $pdo->prepare(
             "SELECT s.*, m.title AS movie_title, m.poster, m.age_rating,
                     sc.id AS screen_id, sc.name AS screen_name,
@@ -182,7 +173,6 @@ class CinemaController
             redirect('/cinema');
         }
 
-        // Lấy danh sách ghế đã bán của suất chiếu này từ order_seats
         $soldStmt = $pdo->prepare(
             "SELECT CONCAT(se.row_label, se.seat_number) AS code
              FROM order_seats os
@@ -193,14 +183,38 @@ class CinemaController
         $soldStmt->execute([$showtimeId]);
         $soldSeats = $soldStmt->fetchAll(PDO::FETCH_COLUMN) ?: [];
 
-        // Lấy danh sách combo bắp nước
         $combos = $pdo->query("SELECT id, name, description AS `desc`, icon, price FROM combos WHERE is_active = 1 ORDER BY id ASC")->fetchAll();
 
         return view('client/cinema/seats', compact('showtime', 'showtimeId', 'soldSeats', 'combos'));
     }
 
     /**
-     * Thanh toán & Xử lý đặt vé thật lưu vào CSDL
+     * Trang xem danh sách khuyến mãi / ưu đãi & chính sách điểm thưởng
+     */
+    public function promotions()
+    {
+        $pdo = Database::pdo();
+        $promotions = $pdo->query(
+            "SELECT * FROM promotions
+             WHERE is_active = 1 AND (expires_at IS NULL OR expires_at > NOW())
+             ORDER BY id DESC"
+        )->fetchAll();
+
+        $user = currentUser();
+        $loyalty = null;
+        if ($user) {
+            $loyalty = [
+                'balance' => (int)($user['points_balance'] ?? 0),
+                'spent'   => (int)($user['total_spent'] ?? 0),
+                'tier'    => Loyalty::tier((int)($user['total_spent'] ?? 0))['name'],
+            ];
+        }
+
+        return view('client/cinema/promotions', compact('promotions', 'user', 'loyalty'));
+    }
+
+    /**
+     * Thanh toán & Xử lý đặt vé thật lưu vào CSDL (Voucher + Điểm thưởng Loyalty)
      */
     public function checkout()
     {
@@ -209,6 +223,11 @@ class CinemaController
 
         // ── XỬ LÝ POST: KHÁCH HÀNG XÁC NHẬN ĐẶT VÉ & THANH TOÁN ──
         if (isPost()) {
+            if (!csrf_check()) {
+                $_SESSION['checkout_error'] = 'Phiên làm việc đã hết hạn, vui lòng thử lại.';
+                redirect('/cinema');
+            }
+
             $showtimeId     = (int)($_POST['showtime_id'] ?? 0);
             $seatsParam     = trim($_POST['seats'] ?? '');
             $combosJson     = trim($_POST['combos'] ?? '{}');
@@ -217,12 +236,12 @@ class CinemaController
             $customerEmail  = trim($_POST['customer_email'] ?? '');
             $paymentMethod  = trim($_POST['payment_method'] ?? 'momo');
             $promoCode      = strtoupper(trim($_POST['promo_code'] ?? ''));
+            $pointsWanted   = max(0, (int)($_POST['points_used'] ?? 0));
 
             if (!$showtimeId || empty($seatsParam) || empty($customerName) || empty($customerPhone)) {
                 redirect('/cinema');
             }
 
-            // Lấy thông tin suất chiếu
             $stmt = $pdo->prepare("SELECT s.*, sc.id as screen_id FROM showtimes s JOIN screens sc ON sc.id = s.screen_id WHERE s.id = ?");
             $stmt->execute([$showtimeId]);
             $showtime = $stmt->fetch();
@@ -230,10 +249,11 @@ class CinemaController
                 redirect('/cinema');
             }
 
-            // Tách danh sách ghế đã chọn (ví dụ: D5, D6)
             $seatCodes = array_values(array_filter(array_map('trim', explode(',', $seatsParam))));
+            if (empty($seatCodes)) {
+                redirect('/cinema/seats?showtime_id=' . $showtimeId);
+            }
 
-            // Tìm thông tin các ghế trong phòng chiếu này
             $placeholders = implode(',', array_fill(0, count($seatCodes), '?'));
             $seatQuery = $pdo->prepare(
                 "SELECT se.id, se.row_label, se.seat_number, se.seat_type,
@@ -249,7 +269,7 @@ class CinemaController
                 redirect('/cinema/seats?showtime_id=' . $showtimeId);
             }
 
-            // Kiểm tra trùng ghế (Ghế đã bị người khác đặt chưa)
+            // Kiểm tra trùng ghế
             $seatIds = array_column($selectedSeats, 'id');
             $seatIdPlaceholders = implode(',', array_fill(0, count($seatIds), '?'));
             $checkSoldStmt = $pdo->prepare(
@@ -302,11 +322,11 @@ class CinemaController
                 }
             }
 
-            // Kiểm tra mã giảm giá
+            // 1. Áp dụng Mã giảm giá (Voucher)
             $discount = 0;
             $promotionId = null;
             if ($promoCode !== '') {
-                $promoStmt = $pdo->prepare("SELECT * FROM promotions WHERE code = ? AND is_active = 1 LIMIT 1");
+                $promoStmt = $pdo->prepare("SELECT * FROM promotions WHERE code = ? AND is_active = 1 AND (expires_at IS NULL OR expires_at > NOW()) LIMIT 1");
                 $promoStmt->execute([$promoCode]);
                 $promo = $promoStmt->fetch();
                 if ($promo) {
@@ -319,22 +339,38 @@ class CinemaController
                 }
             }
 
-            $grandTotal = max(0, $ticketsTotal + $combosTotal - $discount);
+            $discount   = min($discount, $ticketsTotal + $combosTotal);
+            $afterPromo = $ticketsTotal + $combosTotal - $discount;
 
-            // Sinh mã đơn hàng duy nhất
             $orderCode = 'ORD-' . date('Ymd') . '-' . strtoupper(substr(bin2hex(random_bytes(3)), 0, 5));
 
-            // Bắt đầu Transaction lưu CSDL
+            // Transaction lưu đơn + điểm thưởng
             $pdo->beginTransaction();
             try {
+                $userId  = $user ? (int)$user['id'] : null;
+                $balance = $userId ? Loyalty::lockBalance($pdo, $userId) : null;
+                if ($balance === null) {
+                    $userId  = null;
+                    $balance = 0;
+                }
+
+                $pointsUsed = 0;
+                if ($userId && $pointsWanted > 0) {
+                    $pointsUsed = min($pointsWanted, Loyalty::maxRedeem($afterPromo, $balance));
+                }
+                $pointsDiscount = $pointsUsed * Loyalty::POINT_VALUE;
+                $grandTotal     = max(0, $afterPromo - $pointsDiscount);
+                $pointsEarned   = $userId ? Loyalty::calcEarn($ticketsTotal, $combosTotal, $grandTotal) : 0;
+
                 $orderStmt = $pdo->prepare(
                     "INSERT INTO orders (code, user_id, showtime_id, customer_name, customer_phone, customer_email,
-                                         promotion_id, tickets_total, combos_total, discount, total, payment_method, status)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed')"
+                                         promotion_id, tickets_total, combos_total, discount,
+                                         points_used, points_discount, points_earned, total, payment_method, status)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed')"
                 );
                 $orderStmt->execute([
                     $orderCode,
-                    $user ? $user['id'] : null,
+                    $userId,
                     $showtimeId,
                     $customerName,
                     $customerPhone,
@@ -343,18 +379,19 @@ class CinemaController
                     $ticketsTotal,
                     $combosTotal,
                     $discount,
+                    $pointsUsed,
+                    $pointsDiscount,
+                    $pointsEarned,
                     $grandTotal,
                     $paymentMethod,
                 ]);
                 $orderId = (int)$pdo->lastInsertId();
 
-                // Lưu danh sách ghế vào order_seats
                 $seatInsert = $pdo->prepare("INSERT INTO order_seats (order_id, showtime_id, seat_id, price) VALUES (?, ?, ?, ?)");
                 foreach ($seatsWithPrice as $swp) {
                     $seatInsert->execute([$orderId, $showtimeId, $swp['seat_id'], $swp['price']]);
                 }
 
-                // Lưu danh sách combo vào order_combos
                 if (!empty($combosToInsert)) {
                     $comboInsert = $pdo->prepare("INSERT INTO order_combos (order_id, combo_id, quantity, price) VALUES (?, ?, ?, ?)");
                     foreach ($combosToInsert as $cti) {
@@ -362,23 +399,30 @@ class CinemaController
                     }
                 }
 
-                $pdo->commit();
+                if ($userId) {
+                    Loyalty::settleOrder($pdo, $userId, $orderId, $orderCode, $balance, $pointsUsed, $pointsEarned, $grandTotal);
+                }
 
-                // Đặt vé thành công, chuyển hướng sang xem vé điện tử
-                redirect('/cinema/ticket?code=' . urlencode($orderCode));
+                $pdo->commit();
             } catch (\Exception $e) {
-                $pdo->rollBack();
-                $_SESSION['checkout_error'] = 'Lỗi trong quá trình tạo đơn: ' . $e->getMessage();
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                $msg = ($e instanceof \PDOException && ($e->errorInfo[1] ?? 0) === 1062)
+                    ? 'Ghế vừa có người đặt. Vui lòng chọn ghế khác.'
+                    : 'Lỗi trong quá trình tạo đơn: ' . $e->getMessage();
+                $_SESSION['checkout_error'] = $msg;
                 redirect("/cinema/seats?showtime_id={$showtimeId}");
             }
+
+            redirect('/cinema/ticket?code=' . urlencode($orderCode));
         }
 
         // ── XỬ LÝ GET: HIỂN THỊ TRANG XÁC NHẬN THANH TOÁN ──
-        $showtimeId = (int)($_GET['showtime_id'] ?? 1);
-        $seatsParam = $_GET['seats'] ?? 'D5, D6';
+        $showtimeId  = (int)($_GET['showtime_id'] ?? 1);
+        $seatsParam  = $_GET['seats'] ?? '';
         $combosParam = $_GET['combos'] ?? '{}';
 
-        // Lấy thông tin suất chiếu
         $stmt = $pdo->prepare(
             "SELECT s.*, m.title AS movie_title, m.poster, m.age_rating,
                     sc.id AS screen_id, sc.name AS screen_name,
@@ -396,25 +440,23 @@ class CinemaController
             redirect('/cinema');
         }
 
-        // Tính tiền vé từ danh sách ghế
         $seatList = array_values(array_filter(array_map('trim', explode(',', $seatsParam)), fn($s) => preg_match('/^[A-Z][0-9]{1,2}$/', $s)));
-        if (empty($seatList)) $seatList = ['D5', 'D6'];
+        if (empty($seatList)) {
+            redirect('/cinema/seats?showtime_id=' . $showtimeId);
+        }
 
         $ticketTotal = 0;
-        if (!empty($seatList)) {
-            $placeholders = implode(',', array_fill(0, count($seatList), '?'));
-            $sQuery = $pdo->prepare("SELECT se.*, st.surcharge FROM seats se JOIN seat_types st ON st.code = se.seat_type WHERE se.screen_id = ? AND CONCAT(se.row_label, se.seat_number) IN ($placeholders)");
-            $sQuery->execute(array_merge([$showtime['screen_id']], $seatList));
-            $foundSeats = $sQuery->fetchAll();
-            foreach ($foundSeats as $fs) {
-                $ticketTotal += (int)$showtime['base_price'] + (int)$fs['surcharge'];
-            }
+        $placeholders = implode(',', array_fill(0, count($seatList), '?'));
+        $sQuery = $pdo->prepare("SELECT se.*, st.surcharge FROM seats se JOIN seat_types st ON st.code = se.seat_type WHERE se.screen_id = ? AND CONCAT(se.row_label, se.seat_number) IN ($placeholders)");
+        $sQuery->execute(array_merge([$showtime['screen_id']], $seatList));
+        $foundSeats = $sQuery->fetchAll();
+        foreach ($foundSeats as $fs) {
+            $ticketTotal += (int)$showtime['base_price'] + (int)$fs['surcharge'];
         }
         if ($ticketTotal === 0) {
             $ticketTotal = count($seatList) * (int)$showtime['base_price'];
         }
 
-        // Tính tiền combo từ combosParam
         $comboTotal = 0;
         $combosArray = json_decode($combosParam, true) ?: [];
         $comboSummary = [];
@@ -433,6 +475,35 @@ class CinemaController
 
         $grandTotal = $ticketTotal + $comboTotal;
 
+        // Danh sách khuyến mãi đang hoạt động (để chọn nhanh & JS tính đồng bộ với server)
+        $availablePromos = $pdo->query(
+            "SELECT * FROM promotions
+             WHERE is_active = 1 AND (expires_at IS NULL OR expires_at > NOW())
+             ORDER BY id DESC"
+        )->fetchAll();
+        $promoMap = [];
+        foreach ($availablePromos as $pr) {
+            $promoMap[strtoupper($pr['code'])] = [
+                'type'  => $pr['discount_type'],
+                'value' => (int)$pr['discount_value'],
+                'desc'  => $pr['description'] ?? '',
+            ];
+        }
+
+        // Điểm thưởng hiện tại của khách
+        $loyalty = null;
+        if ($user) {
+            $uStmt = $pdo->prepare('SELECT points_balance, total_spent FROM users WHERE id = ?');
+            $uStmt->execute([$user['id']]);
+            $uRow = $uStmt->fetch();
+            if ($uRow) {
+                $loyalty = [
+                    'balance' => (int)$uRow['points_balance'],
+                    'tier'    => Loyalty::tier((int)$uRow['total_spent'])['name'],
+                ];
+            }
+        }
+
         return view('client/cinema/checkout', compact(
             'showtime',
             'showtimeId',
@@ -443,8 +514,43 @@ class CinemaController
             'ticketTotal',
             'comboTotal',
             'grandTotal',
-            'user'
+            'user',
+            'availablePromos',
+            'promoMap',
+            'loyalty'
         ));
+    }
+
+    /**
+     * Trang Điểm thưởng: số dư, hạng thành viên, lịch sử cộng/trừ điểm
+     */
+    public function points()
+    {
+        $user = currentUser();
+        if (!$user) {
+            redirect('/login');
+        }
+        $pdo = Database::pdo();
+
+        $st = $pdo->prepare('SELECT full_name, points_balance, total_spent FROM users WHERE id = ?');
+        $st->execute([$user['id']]);
+        $row = $st->fetch();
+        if (!$row) {
+            redirect('/logout');
+        }
+        $balance = (int)$row['points_balance'];
+        $spent   = (int)$row['total_spent'];
+        $tier    = Loyalty::tier($spent);
+
+        $hs = $pdo->prepare(
+            'SELECT pt.*, o.code AS order_code FROM point_transactions pt
+             LEFT JOIN orders o ON o.id = pt.order_id
+             WHERE pt.user_id = ? ORDER BY pt.id DESC LIMIT 50'
+        );
+        $hs->execute([$user['id']]);
+        $history = $hs->fetchAll();
+
+        return view('client/cinema/points', compact('row', 'balance', 'spent', 'tier', 'history'));
     }
 
     /**
@@ -462,7 +568,6 @@ class CinemaController
         $searchResults = [];
         $searched = false;
 
-        // Nếu tra cứu theo số điện thoại
         if ($phone !== '') {
             $searched = true;
             $stmt = $pdo->prepare(
@@ -482,24 +587,24 @@ class CinemaController
             }
         }
 
-        // Nếu có mã đơn
         if ($code !== '') {
             $searched = true;
             $stmt = $pdo->prepare(
                 "SELECT o.*, s.starts_at, s.format, m.title AS movie_title, m.poster, m.age_rating,
-                        sc.name AS screen_name, c.name AS cinema_name, c.address AS cinema_address
+                        sc.name AS screen_name, c.name AS cinema_name, c.address AS cinema_address,
+                        p.code AS promo_code
                  FROM orders o
                  JOIN showtimes s ON s.id = o.showtime_id
                  JOIN movies m ON m.id = s.movie_id
                  JOIN screens sc ON sc.id = s.screen_id
                  JOIN cinemas c ON c.id = sc.cinema_id
+                 LEFT JOIN promotions p ON p.id = o.promotion_id
                  WHERE o.code = ? LIMIT 1"
             );
             $stmt->execute([$code]);
             $order = $stmt->fetch();
 
             if ($order) {
-                // Lấy ghế của đơn này
                 $sStmt = $pdo->prepare(
                     "SELECT os.*, se.row_label, se.seat_number, se.seat_type
                      FROM order_seats os
@@ -510,7 +615,6 @@ class CinemaController
                 $sStmt->execute([$order['id']]);
                 $seats = $sStmt->fetchAll();
 
-                // Lấy combo của đơn này
                 $cStmt = $pdo->prepare(
                     "SELECT oc.*, c.name, c.icon
                      FROM order_combos oc

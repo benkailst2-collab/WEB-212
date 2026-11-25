@@ -2,13 +2,10 @@
 /**
  * app/Views/client/cinema/layouts/header.php
  * Layout Header DARK MODE cho giao diện khách hàng MovieGo.
- * 
- * Biến tùy chọn:
- *   $pageTitle    Tiêu đề trang
- *   $activeTab    Tab đang active (home|now_showing|coming_soon)
  */
 $pageTitle = $pageTitle ?? 'MovieGo - Hệ Thống Rạp Chiếu Phim Hiện Đại';
 $h = fn($v) => htmlspecialchars((string) $v, ENT_QUOTES, 'UTF-8');
+$__u = function_exists('currentUser') ? currentUser() : ($_SESSION['user'] ?? null);
 ?>
 <!DOCTYPE html>
 <html lang="vi" class="dark">
@@ -17,7 +14,6 @@ $h = fn($v) => htmlspecialchars((string) $v, ENT_QUOTES, 'UTF-8');
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title><?= $h($pageTitle) ?></title>
   
-  <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -36,10 +32,8 @@ $h = fn($v) => htmlspecialchars((string) $v, ENT_QUOTES, 'UTF-8');
     }
   </script>
   
-  <!-- Lucide Icons CDN -->
   <script src="https://cdn.jsdelivr.net/npm/lucide@0.469.0/dist/umd/lucide.min.js"></script>
   
-  <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -63,11 +57,15 @@ $h = fn($v) => htmlspecialchars((string) $v, ENT_QUOTES, 'UTF-8');
       </a>
 
       <!-- Desktop Nav -->
-      <nav class="hidden md:flex items-center gap-8 text-sm font-medium">
+      <nav class="hidden md:flex items-center gap-7 text-sm font-medium">
         <a href="/cinema" class="text-amber-400 hover:text-amber-300 transition-colors">Trang chủ</a>
         <a href="/cinema#now-showing" class="text-gray-300 hover:text-amber-400 transition-colors">Phim đang chiếu</a>
         <a href="/cinema#coming-soon" class="text-gray-300 hover:text-amber-400 transition-colors">Phim sắp chiếu</a>
+        <a href="/cinema/promotions" class="text-gray-300 hover:text-amber-400 transition-colors">Khuyến mãi</a>
         <a href="/cinema/ticket" class="text-gray-300 hover:text-amber-400 transition-colors">Tra cứu vé</a>
+        <?php if ($__u): ?>
+          <a href="/cinema/points" class="text-gray-300 hover:text-amber-400 transition-colors">Điểm thưởng</a>
+        <?php endif; ?>
       </nav>
 
       <!-- Right actions -->
@@ -80,11 +78,14 @@ $h = fn($v) => htmlspecialchars((string) $v, ENT_QUOTES, 'UTF-8');
         </a>
         <?php endif; ?>
 
-        <!-- Tài khoản: đăng nhập / đăng ký hoặc tên + đăng xuất -->
-        <?php $__u = $_SESSION['user'] ?? null; ?>
+        <!-- Tài khoản: đăng nhập / đăng ký hoặc tên + điểm thưởng + đăng xuất -->
         <?php if ($__u): ?>
-          <span class="hidden sm:inline text-xs font-semibold text-gray-300 max-w-[140px] truncate" title="<?= $h($__u['email']) ?>">
-            Xin chào, <?= $h($__u['full_name']) ?>
+          <a href="/cinema/points" class="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-amber-500/10 border border-amber-500/30 hover:border-amber-400 text-amber-400 text-xs font-bold transition-colors" title="Xem điểm thưởng & lịch sử giao dịch (1 điểm = 1.000₫)">
+            <span>⭐</span>
+            <span><?= number_format((int)($__u['points_balance'] ?? 0), 0, ',', '.') ?> điểm</span>
+          </a>
+          <span class="hidden sm:inline text-xs font-semibold text-gray-300 max-w-[120px] truncate" title="<?= $h($__u['email']) ?>">
+            <?= $h($__u['full_name']) ?>
           </span>
           <form method="post" action="/logout" class="inline">
             <input type="hidden" name="csrf" value="<?= $h(function_exists('csrf_token') ? csrf_token() : '') ?>">
@@ -107,8 +108,14 @@ $h = fn($v) => htmlspecialchars((string) $v, ENT_QUOTES, 'UTF-8');
       <a href="/cinema" class="block px-3 py-2 rounded-lg text-sm font-semibold text-amber-400 bg-amber-500/10">Trang chủ</a>
       <a href="/cinema#now-showing" class="block px-3 py-2 rounded-lg text-sm font-medium text-gray-300 hover:bg-gray-800">Phim đang chiếu</a>
       <a href="/cinema#coming-soon" class="block px-3 py-2 rounded-lg text-sm font-medium text-gray-300 hover:bg-gray-800">Phim sắp chiếu</a>
+      <a href="/cinema/promotions" class="block px-3 py-2 rounded-lg text-sm font-medium text-gray-300 hover:bg-gray-800">Khuyến mãi</a>
       <a href="/cinema/ticket" class="block px-3 py-2 rounded-lg text-sm font-medium text-gray-300 hover:bg-gray-800">Tra cứu vé</a>
-      <?php if (empty($_SESSION['user'])): ?>
+      <?php if ($__u): ?>
+        <a href="/cinema/points" class="flex items-center justify-between px-3 py-2 rounded-lg text-xs font-bold text-amber-400 bg-amber-500/10">
+          <span>⭐ Điểm thưởng của bạn</span>
+          <span><?= number_format((int)($__u['points_balance'] ?? 0), 0, ',', '.') ?> điểm</span>
+        </a>
+      <?php else: ?>
         <a href="/login" class="block px-3 py-2 rounded-lg text-sm font-medium text-gray-300 hover:bg-gray-800">Đăng nhập</a>
         <a href="/register" class="block px-3 py-2 rounded-lg text-sm font-medium text-gray-300 hover:bg-gray-800">Đăng ký</a>
       <?php endif; ?>

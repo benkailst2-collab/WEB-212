@@ -1,10 +1,12 @@
 <?php
 /**
- * app/Views/admin/cinema/users.php - Quản lý Người dùng & Khách hàng
+ * app/Views/admin/cinema/users.php - Quản lý Người dùng, Hạng & Điểm thưởng
  */
 $pageTitle = 'Quản Lý Người Dùng - MovieGo Admin';
 $activeMenu = 'users';
 include __DIR__ . '/layouts/sidebar.php';
+
+use App\Core\Loyalty;
 
 $users = $users ?? [];
 $msg   = $msg ?? '';
@@ -20,8 +22,8 @@ $msg   = $msg ?? '';
 
   <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
     <div>
-      <h1 class="text-xl sm:text-2xl font-black text-gray-900">Quản lý Tài Khoản Người Dùng (<?= count($users) ?>)</h1>
-      <p class="text-xs text-gray-500 mt-0.5">Danh sách tài khoản khách hàng và quản trị viên trong hệ thống CSDL.</p>
+      <h1 class="text-xl sm:text-2xl font-black text-gray-900">Quản lý Tài Khoản & Điểm Thưởng (<?= count($users) ?>)</h1>
+      <p class="text-xs text-gray-500 mt-0.5">Danh sách tài khoản khách hàng, phân quyền, hạng thành viên và số dư điểm thưởng (1 điểm = 1.000₫).</p>
     </div>
   </div>
 
@@ -31,25 +33,46 @@ $msg   = $msg ?? '';
         <thead class="bg-gray-50 text-gray-400 font-bold uppercase text-[10px]">
           <tr>
             <th class="py-3 px-4">Họ và tên</th>
-            <th class="py-3 px-4">Email</th>
-            <th class="py-3 px-4">Số điện thoại</th>
-            <th class="py-3 px-4">Ngày đăng ký</th>
+            <th class="py-3 px-4">Email / SĐT</th>
+            <th class="py-3 px-4">Hạng / Chi tiêu</th>
+            <th class="py-3 px-4">Điểm thưởng</th>
             <th class="py-3 px-4">Vai trò</th>
-            <th class="py-3 px-4 text-right">Phân quyền</th>
+            <th class="py-3 px-4 text-right">Thao tác</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-100">
-          <?php foreach ($users as $u): ?>
+          <?php foreach ($users as $u):
+            $spent = (int)($u['total_spent'] ?? 0);
+            $tier  = Loyalty::tier($spent)['name'];
+          ?>
             <tr class="hover:bg-gray-50/80 transition-colors">
               <td class="py-3.5 px-4 font-bold text-gray-900 flex items-center gap-2">
                 <div class="w-7 h-7 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-[11px]">
                   <?= strtoupper(substr($u['full_name'], 0, 1)) ?>
                 </div>
-                <span><?= htmlspecialchars($u['full_name']) ?></span>
+                <div>
+                  <span class="block"><?= htmlspecialchars($u['full_name']) ?></span>
+                  <span class="text-[10px] font-normal text-gray-400"><?= date('d/m/Y', strtotime($u['created_at'])) ?></span>
+                </div>
               </td>
-              <td class="py-3.5 px-4 text-gray-600"><?= htmlspecialchars($u['email']) ?></td>
-              <td class="py-3.5 px-4 font-mono text-gray-500"><?= htmlspecialchars($u['phone'] ?: 'Chưa cập nhật') ?></td>
-              <td class="py-3.5 px-4 text-gray-400"><?= date('d/m/Y H:i', strtotime($u['created_at'])) ?></td>
+              <td class="py-3.5 px-4">
+                <span class="block text-gray-700"><?= htmlspecialchars($u['email']) ?></span>
+                <span class="font-mono text-[11px] text-gray-400"><?= htmlspecialchars($u['phone'] ?: 'Chưa cập nhật') ?></span>
+              </td>
+              <td class="py-3.5 px-4">
+                <span class="px-2 py-0.5 rounded-full text-[10px] font-bold <?= $tier === 'VVIP' ? 'bg-purple-100 text-purple-700' : ($tier === 'VIP' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600') ?>">
+                  <?= htmlspecialchars($tier) ?>
+                </span>
+                <span class="block text-[11px] text-gray-500 mt-1"><?= number_format($spent, 0, ',', '.') ?>₫</span>
+              </td>
+              <td class="py-3.5 px-4 font-bold text-amber-600">
+                <form method="post" action="/admin/cinema/users" class="inline-flex items-center gap-1">
+                  <input type="hidden" name="action" value="update_points">
+                  <input type="hidden" name="id" value="<?= $u['id'] ?>">
+                  <input type="number" min="0" step="1" name="points_balance" value="<?= (int)($u['points_balance'] ?? 0) ?>" class="w-20 bg-gray-50 border border-gray-200 rounded px-2 py-0.5 text-xs text-amber-600 font-bold focus:outline-none focus:border-blue-600">
+                  <button type="submit" class="px-2 py-0.5 rounded text-blue-600 hover:bg-blue-50 text-[10px] font-bold" title="Lưu điểm thưởng">Lưu</button>
+                </form>
+              </td>
               <td class="py-3.5 px-4">
                 <?php if ($u['role'] === 'admin'): ?>
                   <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">Quản trị viên (Admin)</span>
@@ -58,14 +81,24 @@ $msg   = $msg ?? '';
                 <?php endif; ?>
               </td>
               <td class="py-3.5 px-4 text-right">
-                <form method="post" action="/admin/cinema/users" class="inline-flex items-center gap-2">
-                  <input type="hidden" name="action" value="change_role">
-                  <input type="hidden" name="id" value="<?= $u['id'] ?>">
-                  <select name="role" onchange="this.form.submit()" class="bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 text-[11px] text-gray-700 focus:outline-none focus:border-blue-600">
-                    <option value="customer" <?= $u['role'] === 'customer' ? 'selected' : '' ?>>Khách hàng</option>
-                    <option value="admin" <?= $u['role'] === 'admin' ? 'selected' : '' ?>>Quản trị viên</option>
-                  </select>
-                </form>
+                <div class="inline-flex items-center gap-2">
+                  <form method="post" action="/admin/cinema/users" class="inline-flex items-center">
+                    <input type="hidden" name="action" value="change_role">
+                    <input type="hidden" name="id" value="<?= $u['id'] ?>">
+                    <select name="role" onchange="this.form.submit()" class="bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 text-[11px] text-gray-700 focus:outline-none focus:border-blue-600">
+                      <option value="customer" <?= $u['role'] === 'customer' ? 'selected' : '' ?>>Khách hàng</option>
+                      <option value="admin" <?= $u['role'] === 'admin' ? 'selected' : '' ?>>Quản trị viên</option>
+                    </select>
+                  </form>
+
+                  <form method="post" action="/admin/cinema/users" class="inline" onsubmit="return confirm('Bạn có chắc chắn muốn xóa tài khoản này?');">
+                    <input type="hidden" name="action" value="delete">
+                    <input type="hidden" name="id" value="<?= $u['id'] ?>">
+                    <button type="submit" class="p-1 rounded-lg text-red-600 hover:bg-red-50 transition-colors" title="Xóa tài khoản">
+                      <i data-lucide="trash-2" class="w-4 h-4"></i>
+                    </button>
+                  </form>
+                </div>
               </td>
             </tr>
           <?php endforeach; ?>
